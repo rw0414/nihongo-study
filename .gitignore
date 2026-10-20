@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# 교재 원본과 변환 결과(저작물)는 저장소에 넣지 않음
+*.pdf
+/books/
