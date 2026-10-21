@@ -3,6 +3,7 @@
 // 테이블을 추가할 때는 version(2).stores({...}) 처럼 버전을 올려서 추가한다 (기존 데이터 유지).
 import Dexie, { type Table } from 'dexie'
 import type { RawSentence, RawVocab, UnitContent } from './content'
+import { newSched, review as applyReview, sentenceGrade, type Sched } from './srs'
 
 export interface Book {
   id: string // 원본 PDF의 SHA-256 앞 16자리 → 같은 PDF 중복 등록 방지
@@ -86,13 +87,14 @@ export type Step = 'vocab' | 'vocab-intro' | 'vocab-review' | 'grammar' | 'sente
 /** 하루 루틴 1회 (StudySession). 진행 상태를 저장해 두었다가 앱을 다시 열면 이어서 한다 */
 export interface Session {
   id?: number
-  key: string // `${unitId}#${partId ?? 'all'}`
+  key: string // `${unitId}#${partId ?? 'all'}`, 오답만 학습은 `review#${bookId}`
   unitId: string
   partId?: string
   date: string
   startedAt: number
   endedAt?: number // 있으면 완료
-  state: { step: Step; queue: string[]; i: number; wrongV: string[]; wrongS: string[]; tries: Record<string, number> }
+  // wrongV/S = 오늘 틀린 것, dueV/S = 복습할 때가 된 것 (시작할 때 정해 둠)
+  state: { step: Step; queue: string[]; i: number; wrongV: string[]; wrongS: string[]; dueV?: string[]; dueS?: string[]; tries: Record<string, number> }
   stats: { vocab: number; vocabOk: number; sentences: number; sentencesOk: number; cards: number }
 }
 
@@ -105,6 +107,7 @@ class StudyDB extends Dexie {
   sentences!: Table<Sentence, string>
   reviews!: Table<Review, number>
   sessions!: Table<Session, number>
+  schedules!: Table<Sched, string>
 
   constructor() {
     super('nihongo-study')
@@ -122,15 +125,25 @@ class StudyDB extends Dexie {
       reviews: '++id, itemId, unitId, date',
       sessions: '++id, key, unitId, date',
     })
+    // Phase 4: 항목별 복습 일정. 그동안의 학습 기록을 순서대로 다시 반영해서 만든다
+    this.version(4).stores({ schedules: 'itemId, itemType, unitId, due' }).upgrade(async tx => {
+      const map = new Map<string, Sched>()
+      await tx.table<Review>('reviews').orderBy('id').each(r => {
+        const prev = map.get(r.itemId) ?? newSched(r.itemId, r.itemType, r.unitId, r.date)
+        const g = r.itemType === 'vocab' ? { grade: r.grade ?? (r.correct ? 'good' : 'again') } : sentenceGrade(r.correct ? { ok: true, score: 100 } : r.answer ? { ok: false, score: r.score ?? 0 } : null)
+        map.set(r.itemId, applyReview(prev, g.grade as VocabGrade, r.date, 'error' in g ? g.error : undefined, r.itemType === 'vocab' ? g.grade !== 'again' : r.correct))
+      })
+      await tx.table('schedules').bulkPut([...map.values()])
+    })
   }
 }
 
 export const db = new StudyDB()
 
 export async function deleteBook(bookId: string) {
-  await db.transaction('rw', [db.books, db.chapters, db.pages, db.units, db.vocab, db.sentences, db.reviews, db.sessions], async () => {
+  await db.transaction('rw', [db.books, db.chapters, db.pages, db.units, db.vocab, db.sentences, db.reviews, db.sessions, db.schedules], async () => {
     for (const t of [db.units, db.vocab, db.sentences]) await t.where('bookId').equals(bookId).delete()
-    for (const t of [db.reviews, db.sessions]) await t.where('unitId').startsWith(`${bookId}/`).delete()
+    for (const t of [db.reviews, db.sessions, db.schedules]) await t.where('unitId').startsWith(`${bookId}/`).delete()
     await db.pages.where('bookId').equals(bookId).delete()
     await db.chapters.where('bookId').equals(bookId).delete()
     await db.books.delete(bookId)

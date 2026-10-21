@@ -2,28 +2,33 @@ import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Review, type Sentence, type Session, type Step, type Vocab, type VocabGrade } from '../db'
 import { dayContent, dayKey, grade, pickSentences, pickVocab, type Grade } from '../study'
+import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type ErrorType } from '../srs'
 import { CardView, OriginalPage } from './Unit'
 import { go } from '../App'
 
-// 오늘의 학습 루틴 (Phase 3)
-// 1단계 단어: 새 단어 → (틀린 게 있으면) 전환 화면 → 틀린 단어 복습
+// 오늘의 학습 루틴 (Phase 3·4)
+// 1단계 단어: 새 단어 → 전환 화면 → 오늘 틀린 단어 + 복습할 때가 된 단어
 // 2단계 문법 카드
-// 3단계 예문: 새 예문 → (틀린 게 있으면) 전환 화면 → 틀린 예문 다시 쓰기
+// 3단계 예문: 새 예문 → 전환 화면 → 오늘 틀린 예문 + 복습할 때가 된 예문
+// 오답만 학습(cid 없음): 아직 회복하지 못한 오답 단어 → 오답 예문
 // 진행 상태는 매 답마다 sessions에 저장되어, 앱을 닫았다 열어도 이어서 한다.
 
 const STAGE: Record<Step, number> = { vocab: 0, 'vocab-intro': 0, 'vocab-review': 0, grammar: 1, sentence: 2, 'sentence-intro': 2, 'sentence-review': 2, done: 3 }
 const STAGE_NAME = ['1단계 · 단어 암기', '2단계 · 문법 카드', '3단계 · 예문 작성']
 const MAX_TRIES = 3 // 같은 날 복습에서 한 항목을 다시 내는 최대 횟수
+const DUE_LIMIT = { vocab: 30, sentence: 10 } // 하루 루틴에 섞는 복습 예정 항목 최대 수
+const ORDER: Step[] = ['vocab', 'vocab-intro', 'vocab-review', 'grammar', 'sentence', 'sentence-intro', 'sentence-review', 'done']
 
 /** 발음 듣기: 기기 내장 음성 합성(일본어). 교재 음원 연결은 Phase 6 */
 function speak(text: string) {
+  if (!('speechSynthesis' in window)) return
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'ja-JP'
   speechSynthesis.cancel()
   speechSynthesis.speak(u)
 }
 
-function TopBar({ step, i, total, onClose }: { step: Step; i: number; total: number; onClose: () => void }) {
+function TopBar({ step, i, total, review, onClose }: { step: Step; i: number; total: number; review?: boolean; onClose: () => void }) {
   const stage = STAGE[step]
   const frac = total ? Math.min(i / total, 1) : 0
   return (
@@ -39,17 +44,17 @@ function TopBar({ step, i, total, onClose }: { step: Step; i: number; total: num
       </div>
       {stage < 3 && (
         <div className="row small">
-          <b className="accent-text">{STAGE_NAME[stage]}</b>
+          <b className="accent-text">{review ? (stage === 0 ? '오답 노트 · 단어' : '오답 노트 · 예문') : STAGE_NAME[stage]}</b>
           <span className="grow" />
-          {step.endsWith('review') && <span className="tag warn">틀린 것 복습</span>}
+          {step.endsWith('review') && !review && <span className="tag warn">복습</span>}
         </div>
       )}
     </>
   )
 }
 
-// ── 1단계: 단어 카드 ──
-function VocabCard({ v, example, onGrade }: { v: Vocab; example?: { ja: string; ko: string }; onGrade: (g: VocabGrade, ms: number) => void }) {
+// ── 단어 카드 ──
+function VocabCard({ v, example, tag, onGrade }: { v: Vocab; example?: { ja: string; ko: string }; tag?: string; onGrade: (g: VocabGrade, ms: number) => void }) {
   const [back, setBack] = useState(false)
   const shown = useRef(Date.now())
   useEffect(() => { setBack(false); shown.current = Date.now() }, [v.id])
@@ -58,6 +63,7 @@ function VocabCard({ v, example, onGrade }: { v: Vocab; example?: { ja: string; 
     <>
       <div className="card flash-card">
         <span className={`tag ${ai ? 'ai' : 'info'} corner`}>{ai ? 'AI 제안 단어' : '교재 단어'}</span>
+        {tag && <span className="tag warn corner-r">{tag}</span>}
         {back && v.reading !== v.ja && <div className="jp reading">{v.reading}</div>}
         <div className="jp flash-ja">{v.ja}</div>
         <button className="icon-btn round" aria-label="발음 듣기" onClick={() => speak(v.reading || v.ja)}>🔊</button>
@@ -92,16 +98,12 @@ function VocabCard({ v, example, onGrade }: { v: Vocab; example?: { ja: string; 
   )
 }
 
-// ── 3단계: 예문 입력·채점 ──
+// ── 예문 입력·채점 ──
 function DiffView({ g }: { g: Grade }) {
-  return (
-    <div className="jp diff">
-      {g.diff.map((p, i) => <span key={i} className={`d-${p.t}`}>{p.s}</span>)}
-    </div>
-  )
+  return <div className="jp diff">{g.diff.map((p, i) => <span key={i} className={`d-${p.t}`}>{p.s}</span>)}</div>
 }
 
-function SentenceCard({ s, review, onDone }: { s: Sentence; review: boolean; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
+function SentenceCard({ s, review: isReview, tag, onDone }: { s: Sentence; review: boolean; tag?: string; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
   const [text, setText] = useState('')
   const [result, setResult] = useState<{ g: Grade | null; answer: string }>()
   const shown = useRef(Date.now())
@@ -117,7 +119,9 @@ function SentenceCard({ s, review, onDone }: { s: Sentence; review: boolean; onD
     return (
       <>
         <div className="card prompt-card">
-          <div className="muted small">{review ? '아까 틀린 문장이에요. 다시 써 보세요' : s.given ? '주어진 단어로 문장을 만들어 보세요' : '다음 문장을 일본어로 써 보세요'}</div>
+          <div className="row">
+            <div className="muted small grow">{isReview ? (tag ?? '복습할 문장이에요. 다시 써 보세요') : s.given ? '주어진 단어로 문장을 만들어 보세요' : '다음 문장을 일본어로 써 보세요'}</div>
+          </div>
           {s.given && <div className="jp given">{s.given}</div>}
           <div className="prompt-ko">{s.ko}</div>
           {s.hint && <div className="blk-note">{s.hint}</div>}
@@ -168,21 +172,22 @@ function SentenceCard({ s, review, onDone }: { s: Sentence; review: boolean; onD
 }
 
 // ── 전환 화면 ("틀린 것 복습해 봐요") ──
-function Intro({ title, sub, items, onGo }: { title: string; sub: string; items: string[]; onGo: () => void }) {
+function Intro({ title, wrong, due, items, onGo }: { title: string; wrong: number; due: number; items: string[]; onGo: () => void }) {
   const [left, setLeft] = useState(3)
   useEffect(() => {
     if (left === 0) { onGo(); return }
     const t = setTimeout(() => setLeft(left - 1), 1000)
     return () => clearTimeout(t)
   }, [left, onGo])
+  const sub = [wrong && `오늘 헷갈린 ${wrong}개를 먼저`, due && `복습할 때가 된 ${due}개`].filter(Boolean).join(', 이어서 ')
   return (
     <>
       <div className="intro-check">✓</div>
       <div className="intro-title">{title}</div>
       <div className="card col">
-        <div className="result-title">이제 틀린 것을 복습해 봐요</div>
+        <div className="result-title">{wrong ? '이제 틀린 것을 복습해 봐요' : '이제 복습할 차례예요'}</div>
         <div className="muted small">{sub}</div>
-        <div className="chips">{items.slice(0, 8).map(t => <span key={t} className="tag warn jp">{t}</span>)}{items.length > 8 && <span className="muted small">외 {items.length - 8}개</span>}</div>
+        <div className="chips">{items.slice(0, 8).map((t, i) => <span key={i} className="tag warn jp">{t}</span>)}{items.length > 8 && <span className="muted small">외 {items.length - 8}개</span>}</div>
       </div>
       <div className="grow" />
       <button className="btn primary wide big" onClick={onGo}>복습 시작 · {left}초 후 자동</button>
@@ -191,39 +196,46 @@ function Intro({ title, sub, items, onGo }: { title: string; sub: string; items:
   )
 }
 
-export default function Study({ bookId, cid, partId }: { bookId: string; cid: string; partId?: string }) {
-  const unitId = `${bookId}/${cid}`
-  const key = `${unitId}#${partId ?? 'all'}`
+export default function Study({ bookId, cid, partId }: { bookId: string; cid?: string; partId?: string }) {
+  const reviewOnly = !cid // 오답만 학습
+  const unitId = reviewOnly ? `${bookId}/review` : `${bookId}/${cid}`
+  const key = reviewOnly ? `review#${bookId}` : `${unitId}#${partId ?? 'all'}`
   const book = useLiveQuery(() => db.books.get(bookId), [bookId])
-  const unit = useLiveQuery(() => db.units.get(unitId), [unitId])
-  const vocabAll = useLiveQuery(() => db.vocab.where('unitId').equals(unitId).toArray(), [unitId])
-  const sentAll = useLiveQuery(() => db.sentences.where('unitId').equals(unitId).toArray(), [unitId])
+  const units = useLiveQuery(async () => new Map((await db.units.where('bookId').equals(bookId).toArray()).map(u => [u.id, u])), [bookId])
+  // 복습 항목은 다른 단원에서도 오므로 교재 전체를 불러 둔다
+  const vocabAll = useLiveQuery(() => db.vocab.where('bookId').equals(bookId).toArray(), [bookId])
+  const sentAll = useLiveQuery(() => db.sentences.where('bookId').equals(bookId).toArray(), [bookId])
   const [session, setSession] = useState<Session>()
+  const [nothing, setNothing] = useState(false) // 오답만 학습인데 복습할 게 없음
   const [showOrig, setShowOrig] = useState(false)
+  const busy = useRef(false) // 연타 방지: 한 항목에 답은 한 번만 (저장이 끝나면 풀림)
 
-  const ready = book && unit && vocabAll && sentAll
-  const day = ready ? dayContent(unit.data, partId) : undefined
+  const unit = units?.get(unitId)
+  const ready = book && units && vocabAll && sentAll && (reviewOnly || unit)
+  const day = unit ? dayContent(unit.data, partId) : undefined
   const parts = unit?.data.parts
   const isLast = !parts || parts.at(-1)?.id === partId
-  const V = ready && day ? pickVocab(vocabAll, day, isLast) : []
-  // 예문은 교재 순서대로 (DB는 id 순이라 실력 다지기가 먼저 나옴)
+  const unitVocab = vocabAll?.filter(v => v.unitId === unitId) ?? []
+  const unitSent = sentAll?.filter(s => s.unitId === unitId) ?? []
   const order = new Map(unit?.data.sentences.map((s, i) => [`${unitId}/${s.id}`, i]))
-  const S = ready && day ? pickSentences(sentAll, day, unitId).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)) : []
+  const V = ready && day ? pickVocab(unitVocab, day, isLast) : []
+  // 예문은 교재 순서대로 (DB는 id 순이라 실력 다지기가 먼저 나옴)
+  const S = ready && day ? pickSentences(unitSent, day, unitId).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)) : []
 
   const queueFor = (step: Step, st: Session['state']) =>
     step === 'vocab' ? V.map(v => v.id) :
-    step === 'vocab-review' ? st.wrongV :
-    step === 'grammar' ? day!.cards.map(c => c.id) :
+    step === 'vocab-review' ? [...st.wrongV, ...(st.dueV ?? [])] :
+    step === 'grammar' ? day?.cards.map(c => c.id) ?? [] :
     step === 'sentence' ? S.map(s => s.id) :
-    step === 'sentence-review' ? st.wrongS : []
+    step === 'sentence-review' ? [...st.wrongS, ...(st.dueS ?? [])] : []
 
-  // 다음 단계 (비어 있는 단계는 건너뜀)
+  // 다음 단계 (비어 있는 단계는 건너뜀, 오답만 학습은 전환 화면 없이 바로)
   const after = (step: Step, st: Session['state']): Step => {
-    const order: Step[] = ['vocab', 'vocab-intro', 'vocab-review', 'grammar', 'sentence', 'sentence-intro', 'sentence-review', 'done']
-    for (let k = order.indexOf(step) + 1; k < order.length; k++) {
-      const s = order[k]
-      if (s === 'vocab-intro' || s === 'vocab-review') { if (st.wrongV.length) return s; continue }
-      if (s === 'sentence-intro' || s === 'sentence-review') { if (st.wrongS.length) return s; continue }
+    for (let k = ORDER.indexOf(step) + 1; k < ORDER.length; k++) {
+      const s = ORDER[k]
+      if (s === 'vocab-intro' && reviewOnly) continue
+      if (s === 'sentence-intro' && reviewOnly) continue
+      if (s === 'vocab-intro' || s === 'sentence-intro') { if (queueFor(s === 'vocab-intro' ? 'vocab-review' : 'sentence-review', st).length) return s; continue }
       if (s === 'done' || queueFor(s, st).length) return s
     }
     return 'done'
@@ -234,24 +246,57 @@ export default function Study({ bookId, cid, partId }: { bookId: string; cid: st
     if (!ready || session) return
     ;(async () => {
       const today = dayKey()
-      let s = await db.sessions.where('key').equals(key).filter(x => !x.endedAt && x.date === today).last()
+      let s = await db.sessions.where('key').equals(key).filter(x => !x.endedAt && x.date === today && x.state.step !== 'done').last()
       if (!s) {
+        const sched = await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray()
         const st: Session['state'] = { step: 'vocab', queue: [], i: 0, wrongV: [], wrongS: [], tries: {} }
-        st.step = queueFor('vocab', st).length ? 'vocab' : after('vocab', st)
+        if (reviewOnly) {
+          // 아직 회복하지 못한 오답: 틀린 횟수 많은 것부터. 직접 고른 연습이라 오늘 본 것도 포함 (일정은 그날 첫 답 기준이라 그대로)
+          const weak = (t: 'vocab' | 'sentence', n: number) => sched
+            .filter(x => x.itemType === t && (recovery(x) === 'weak' || recovery(x) === 'recovering'))
+            .sort((a, b) => b.wrongCount - a.wrongCount).slice(0, n).map(x => x.itemId)
+          st.dueV = weak('vocab', 30)
+          st.dueS = weak('sentence', 15)
+        } else {
+          st.dueV = dueToday(sched, today, 'vocab', new Set(V.map(v => v.id)), DUE_LIMIT.vocab)
+          st.dueS = dueToday(sched, today, 'sentence', new Set(S.map(x => x.id)), DUE_LIMIT.sentence)
+        }
+        st.step = reviewOnly ? (st.dueV.length ? 'vocab-review' : st.dueS.length ? 'sentence-review' : 'done') : queueFor('vocab', st).length ? 'vocab' : after('vocab', st)
         st.queue = queueFor(st.step, st)
+        if (reviewOnly && st.step === 'done') { setNothing(true); return } // 빈 복습은 기록하지 않음 (연속 학습일에도 안 셈)
         s = { key, unitId, partId, date: today, startedAt: Date.now(), state: st, stats: { vocab: 0, vocabOk: 0, sentences: 0, sentencesOk: 0, cards: 0 } }
         s.id = await db.sessions.add(s)
-        const ch = await db.chapters.get(unitId)
-        if (ch?.status === 'new') await db.chapters.update(unitId, { status: 'reading' })
+        if (!reviewOnly) {
+          const ch = await db.chapters.get(unitId)
+          if (ch?.status === 'new') await db.chapters.update(unitId, { status: 'reading' })
+        }
       }
       setSession(s)
     })()
   }, [ready, key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!ready || !session || !day) return null
+  if (nothing) {
+    return (
+      <div className="study">
+        <div className="intro-check">✓</div>
+        <div className="intro-title">복습할 오답이 없어요</div>
+        <div className="muted center">틀린 것을 모두 회복했어요. 정말 잘하고 있어요!</div>
+        <div className="grow" />
+        <button className="btn primary wide big" onClick={() => go('/notes')}>오답 노트로</button>
+      </div>
+    )
+  }
+  if (!ready || !session) return null
   const st = session.state
+  const close = () => go(reviewOnly ? '/notes' : `/unit/${bookId}/${cid}`)
 
-  const save = async (next: Session) => { setSession(next); await db.sessions.put(next) }
+  const save = async (next: Session) => { setSession(next); await db.sessions.put(next); busy.current = false }
+  /** 처리 중이면 무시하고, 아니면 잠그고 실행 */
+  const once = <A extends unknown[]>(f: (...a: A) => Promise<void>) => async (...a: A) => {
+    if (busy.current) return
+    busy.current = true
+    try { await f(...a) } catch (e) { busy.current = false; throw e }
+  }
 
   const goStep = async (step: Step, base: Session = session) => {
     const nst = { ...base.state, step, i: 0 }
@@ -259,10 +304,12 @@ export default function Study({ bookId, cid, partId }: { bookId: string; cid: st
     const next = { ...base, state: nst }
     if (step === 'done') {
       next.endedAt = Date.now()
-      // 단원의 모든 part를 마치면 목차에 '완료' 표시
-      const keys = parts ? parts.map(p => `${unitId}#${p.id}`) : [key]
-      const done = new Set((await db.sessions.where('unitId').equals(unitId).filter(x => !!x.endedAt).toArray()).map(x => x.key).concat(key))
-      if (keys.every(k => done.has(k))) await db.chapters.update(unitId, { status: 'done' })
+      if (!reviewOnly) {
+        // 단원의 모든 part를 마치면 목차에 '완료' 표시
+        const keys = parts ? parts.map(p => `${unitId}#${p.id}`) : [key]
+        const done = new Set((await db.sessions.where('unitId').equals(unitId).filter(x => !!x.endedAt).toArray()).map(x => x.key).concat(key))
+        if (keys.every(k => done.has(k))) await db.chapters.update(unitId, { status: 'done' })
+      }
     }
     await save(next)
   }
@@ -281,30 +328,49 @@ export default function Study({ bookId, cid, partId }: { bookId: string; cid: st
     else await save(next)
   }
 
-  const record = (r: Omit<Review, 'unitId' | 'date' | 'at' | 'phase'>) =>
-    db.reviews.add({ ...r, unitId, date: dayKey(), at: Date.now(), phase: st.step.endsWith('review') ? 'review' : 'new' })
+  /** 답 기록 + 복습 일정 갱신 (그날 첫 답만 일정에 반영) */
+  const record = async (item: { id: string; unitId: string }, type: 'vocab' | 'sentence', g: VocabGrade, r: Omit<Review, 'itemId' | 'itemType' | 'unitId' | 'date' | 'at' | 'phase'>, error?: ErrorType) => {
+    const today = dayKey()
+    await db.reviews.add({ ...r, itemId: item.id, itemType: type, unitId: item.unitId, date: today, at: Date.now(), phase: st.step.endsWith('review') ? 'review' : 'new' })
+    const prev = (await db.schedules.get(item.id)) ?? newSched(item.id, type, item.unitId, today)
+    await db.schedules.put(review(prev, g, today, error, type === 'vocab' ? g !== 'again' : r.correct))
+  }
 
-  const close = () => go(`/unit/${bookId}/${cid}`)
+  /** 같은 문법을 자주 틀리면 그 문법의 다른 예문을 내일 복습에 추가 */
+  const addRelated = async (s: Sentence) => {
+    const sched = new Map((await db.schedules.where('unitId').equals(s.unitId).toArray()).map(x => [x.itemId, x]))
+    const same = sentAll.filter(x => x.unitId === s.unitId)
+    const picks = [...new Set(s.grammar.flatMap(g => relatedPicks(g, same, sched)))]
+    const tomorrow = addDays(dayKey(), 1)
+    await db.schedules.bulkPut(picks.map(id => ({ ...newSched(id, 'sentence', s.unitId, tomorrow), related: true })))
+  }
+
+  const exampleFor = (v: Vocab) => {
+    const cards = v.unitId === unitId && day ? day.cards : units.get(v.unitId)?.data.cards ?? []
+    return cards.flatMap(c => c.blocks).find(b => b.t === 'ex' && b.ja.includes(v.ja)) as { ja: string; ko: string } | undefined
+  }
+  const isDue = (id: string) => (st.dueV ?? []).includes(id) || (st.dueS ?? []).includes(id)
+  const dueTag = (id: string) => reviewOnly ? '오답' : isDue(id) && !st.wrongV.includes(id) && !st.wrongS.includes(id) ? '복습 예정' : undefined
+
   let body: JSX.Element
 
   if (st.step === 'vocab' || st.step === 'vocab-review') {
-    const v = vocabAll.find(x => x.id === st.queue[st.i])!
-    const ex = day.cards.flatMap(c => c.blocks).find(b => b.t === 'ex' && b.ja.includes(v.ja)) as { ja: string; ko: string } | undefined
-    body = (
-      <VocabCard v={v} example={ex} onGrade={async (g, ms) => {
+    const v = vocabAll.find(x => x.id === st.queue[st.i])
+    body = !v ? <><div className="card">이 항목은 콘텐츠를 다시 가져오면서 없어졌어요.</div><button className="btn primary wide big" onClick={() => advance({}, {})}>건너뛰기</button></> : ( // 콘텐츠를 다시 가져오며 사라진 항목
+      <VocabCard v={v} example={exampleFor(v)} tag={st.step === 'vocab-review' ? dueTag(v.id) : undefined} onGrade={once(async (g: VocabGrade, ms: number) => {
         const ok = g === 'good' || g === 'easy'
-        await record({ itemType: 'vocab', itemId: v.id, correct: ok, grade: g, responseMs: ms })
+        await record(v, 'vocab', g, { correct: ok, grade: g, responseMs: ms })
         const isNew = st.step === 'vocab' && !st.tries[v.id]
         const wrongV = !ok && !st.wrongV.includes(v.id) && st.step === 'vocab' ? [...st.wrongV, v.id] : st.wrongV
         await advance({ wrongV }, isNew ? { vocab: session.stats.vocab + 1, vocabOk: session.stats.vocabOk + (ok ? 1 : 0) } : {}, g === 'again' || (st.step === 'vocab-review' && g === 'hard'))
-      }} />
+      })} />
     )
   } else if (st.step === 'vocab-intro') {
-    body = <Intro title={`새 단어 ${V.length}개 완료!`} sub={`헷갈렸던 ${st.wrongV.length}개를 한 번 더 볼게요`}
-      items={st.wrongV.map(id => vocabAll.find(v => v.id === id)?.ja ?? '')} onGo={() => goStep('vocab-review')} />
-  } else if (st.step === 'grammar') {
+    body = <Intro title={`새 단어 ${V.length}개 완료!`} wrong={st.wrongV.length} due={st.dueV?.length ?? 0}
+      items={queueFor('vocab-review', st).map(id => vocabAll.find(v => v.id === id)?.ja ?? '')} onGo={() => goStep('vocab-review')} />
+  } else if (st.step === 'grammar' && day && unit) {
     const c = day.cards.find(x => x.id === st.queue[st.i])!
-    const sMap = new Map(sentAll.map(s => [s.id.slice(unitId.length + 1), s]))
+    const sMap = new Map(unitSent.map(s => [s.id.slice(unitId.length + 1), s]))
     body = (
       <>
         <div className="grammar-scroll">
@@ -313,49 +379,58 @@ export default function Study({ bookId, cid, partId }: { bookId: string; cid: st
         </div>
         <div className="row">
           <button className="btn" disabled={st.i === 0} onClick={() => save({ ...session, state: { ...st, i: st.i - 1 } })} aria-label="이전 카드">‹</button>
-          <button className="btn grow primary big" onClick={() => { setShowOrig(false); advance({}, { cards: session.stats.cards + 1 }) }}>
+          <button className="btn grow primary big" onClick={once(async () => { setShowOrig(false); await advance({}, { cards: session.stats.cards + 1 }) })}>
             {st.i + 1 < st.queue.length ? '다음 카드' : '문법 카드 완료'}
           </button>
         </div>
       </>
     )
   } else if (st.step === 'sentence' || st.step === 'sentence-review') {
-    const s = sentAll.find(x => x.id === st.queue[st.i])!
-    body = (
-      <SentenceCard s={s} review={st.step === 'sentence-review'} onDone={async (g, answer, ms) => {
-        const ok = !!g?.ok
-        await record({ itemType: 'sentence', itemId: s.id, correct: ok, score: g?.score ?? 0, answer, responseMs: ms })
-        const wrongS = !ok && st.step === 'sentence' && !st.wrongS.includes(s.id) ? [...st.wrongS, s.id] : st.wrongS
-        await advance({ wrongS }, st.step === 'sentence' ? { sentences: session.stats.sentences + 1, sentencesOk: session.stats.sentencesOk + (ok ? 1 : 0) } : {})
-      }} />
+    const s = sentAll.find(x => x.id === st.queue[st.i])
+    const isReview = st.step === 'sentence-review'
+    body = !s ? <><div className="card">이 항목은 콘텐츠를 다시 가져오면서 없어졌어요.</div><button className="btn primary wide big" onClick={() => advance({}, {})}>건너뛰기</button></> : (
+      <SentenceCard s={s} review={isReview} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 써 보세요') : undefined}
+        onDone={once(async (g: Grade | null, answer: string, ms: number) => {
+          const ok = !!g?.ok
+          const sg = sentenceGrade(g)
+          await record(s, 'sentence', sg.grade, { correct: ok, score: g?.score ?? 0, answer, responseMs: ms }, sg.error)
+          if (!ok) await addRelated(s)
+          const wrongS = !ok && st.step === 'sentence' && !st.wrongS.includes(s.id) ? [...st.wrongS, s.id] : st.wrongS
+          await advance({ wrongS }, st.step === 'sentence' ? { sentences: session.stats.sentences + 1, sentencesOk: session.stats.sentencesOk + (ok ? 1 : 0) } : {})
+        })} />
     )
   } else if (st.step === 'sentence-intro') {
-    body = <Intro title={`새 예문 ${S.length}개 완료!`} sub={`틀린 ${st.wrongS.length}개를 다시 써 볼게요`}
-      items={st.wrongS.map(id => sentAll.find(s => s.id === id)?.ko ?? '')} onGo={() => goStep('sentence-review')} />
+    body = <Intro title={`새 예문 ${S.length}개 완료!`} wrong={st.wrongS.length} due={st.dueS?.length ?? 0}
+      items={queueFor('sentence-review', st).map(id => sentAll.find(s => s.id === id)?.ko ?? '')} onGo={() => goStep('sentence-review')} />
   } else {
     const { vocab, vocabOk, sentences, sentencesOk, cards } = session.stats
     const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '–')
+    const rv = (st.dueV?.length ?? 0) + st.wrongV.length, rs = (st.dueS?.length ?? 0) + st.wrongS.length
     body = (
       <>
         <div className="intro-check">✓</div>
-        <div className="intro-title">오늘 학습 완료!</div>
-        <div className="muted center">{unit.data.title}{day.title ? ` ${day.title}` : ''} · {Math.max(1, Math.round((Date.now() - session.startedAt) / 60000))}분</div>
-        <div className="card list-card">
-          <div className="item-row"><div className="grow"><b>1 단어 암기</b><div className="muted small">새 단어 {vocab} · 틀린 단어 복습 {st.wrongV.length}</div></div><b className="accent-text">{pct(vocabOk, vocab)}</b></div>
-          <div className="item-row"><div className="grow"><b>2 문법 카드</b><div className="muted small">{cards}장</div></div><b className="accent-text">완료</b></div>
-          <div className="item-row"><div className="grow"><b>3 예문 작성</b><div className="muted small">새 예문 {sentences} · 틀린 예문 복습 {st.wrongS.length}</div></div><b className="accent-text">{pct(sentencesOk, sentences)}</b></div>
+        <div className="intro-title">{reviewOnly ? '오답 복습 완료!' : '오늘 학습 완료!'}</div>
+        <div className="muted center">
+          {reviewOnly ? '오답 노트' : `${unit?.data.title}${day?.title ? ` ${day.title}` : ''}`} · {Math.max(1, Math.round((Date.now() - session.startedAt) / 60000))}분
         </div>
-        {(st.wrongV.length > 0 || st.wrongS.length > 0) && <div className="blk-note">헷갈렸던 항목은 기록해 두었어요. 다음 복습(Phase 4)에서 다시 만나요.</div>}
+        <div className="card list-card">
+          {!reviewOnly && <div className="item-row"><div className="grow"><b>1 단어 암기</b><div className="muted small">새 단어 {vocab} · 복습 {rv}</div></div><b className="accent-text">{pct(vocabOk, vocab)}</b></div>}
+          {reviewOnly && <div className="item-row"><div className="grow"><b>오답 단어</b><div className="muted small">{rv}개 복습</div></div></div>}
+          {!reviewOnly && <div className="item-row"><div className="grow"><b>2 문법 카드</b><div className="muted small">{cards}장</div></div><b className="accent-text">완료</b></div>}
+          {!reviewOnly && <div className="item-row"><div className="grow"><b>3 예문 작성</b><div className="muted small">새 예문 {sentences} · 복습 {rs}</div></div><b className="accent-text">{pct(sentencesOk, sentences)}</b></div>}
+          {reviewOnly && <div className="item-row"><div className="grow"><b>오답 예문</b><div className="muted small">{rs}개 복습</div></div></div>}
+        </div>
+        <div className="blk-note">기억이 약한 것은 내일, 잘 기억한 것은 며칠 뒤에 다시 만나요. 오답 노트에서 언제든 확인할 수 있어요.</div>
         <div className="grow" />
         <button className="btn primary wide big" onClick={() => go('/')}>홈으로</button>
-        <button className="btn ghost wide" onClick={close}>단원 화면으로</button>
+        <button className="btn ghost wide" onClick={() => go('/notes')}>오답 노트 보기</button>
       </>
     )
   }
 
   return (
     <div className="study">
-      <TopBar step={st.step} i={st.i} total={st.queue.length} onClose={close} />
+      <TopBar step={st.step} i={st.i} total={st.queue.length} review={reviewOnly} onClose={close} />
       {st.step === 'grammar' && (
         <button className="link small" onClick={() => setShowOrig(!showOrig)}>{showOrig ? '원본 닫기' : '원본 페이지 함께 보기'}</button>
       )}

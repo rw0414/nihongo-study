@@ -11,12 +11,15 @@ export default function Home() {
   const book = useLiveQuery(() => db.books.orderBy('lastOpenedAt').reverse().first().then(b => b ?? db.books.toCollection().first()).then(b => b ?? null))
   const data = useLiveQuery(async () => {
     if (!book) return null
-    const [chapters, units, sessions] = await Promise.all([
+    const [chapters, units, sessions, sched] = await Promise.all([
       db.chapters.where('bookId').equals(book.id).toArray(),
       db.units.where('bookId').equals(book.id).toArray(),
       db.sessions.where('unitId').startsWith(`${book.id}/`).toArray(),
+      db.schedules.where('unitId').startsWith(`${book.id}/`).toArray(),
     ])
-    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions }
+    const t = dayKey()
+    const due = sched.filter(x => x.due <= t && x.lastDate !== t)
+    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, dueV: due.filter(x => x.itemType === 'vocab').length, dueS: due.filter(x => x.itemType === 'sentence').length }
   }, [book?.id])
 
   if (book === undefined || (book && !data)) return null
@@ -36,7 +39,7 @@ export default function Home() {
   const done = data.sessions.filter(s => s.endedAt)
   const days = streak(done.map(s => s.date))
   const doneToday = done.filter(s => s.date === dayKey())
-  const open = data.sessions.find(s => !s.endedAt && s.date === dayKey())
+  const open = data.sessions.find(s => !s.endedAt && s.date === dayKey() && !s.key.startsWith('review#'))
   const next = open
     ? { unitId: open.unitId, partId: open.partId, title: data.chapters.find(c => c.id === open.unitId)?.title ?? '', partTitle: data.units.get(open.unitId)?.data.parts?.find(p => p.id === open.partId)?.title }
     : nextDay(data.chapters, data.units, new Set(done.map(s => s.key)))
@@ -72,6 +75,9 @@ export default function Home() {
               <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{next.title}{next.partTitle ? ` ${next.partTitle}` : ''}</div>
               {doneToday.length > 0 && !open && <div className="sub">오늘 {doneToday.length}회 완료했어요. 한 번 더 해도 좋아요!</div>}
             </div>
+            {(data.dueV > 0 || data.dueS > 0) && !open && (
+              <div className="blk-note">오늘 복습할 때가 된 단어 {data.dueV}개 · 예문 {data.dueS}개가 학습 중에 함께 나와요.</div>
+            )}
             <div className="steps">
               {STEPS.map((s, i) => (
                 <div className={`step ${i === stage ? 'now' : ''}`} key={s}>

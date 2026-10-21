@@ -216,3 +216,11 @@ input, textarea { font: inherit; font-size: 16px; color: var(--ink); background:
 .study-buttons { display: flex; flex-direction: column; gap: 8px; }
 .warn-text { color: var(--warn); }
 .install-card { border: 2px dashed var(--accent); }
+.flash-card .corner-r { position: absolute; top: 16px; right: 16px; }
+.tabbar { grid-template-columns: repeat(4, 1fr); }
+.chip { height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 13px; color: var(--muted); }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+.dots { display: inline-flex; gap: 3px; }
+.dots .dot { width: 8px; height: 8px; border-radius: 50%; }
+.dots .dot.ok { background: var(--accent); }
+.dots .dot.ng { background: var(--warn); }
