@@ -1,5 +1,5 @@
 // 로컬 데이터베이스 (브라우저 IndexedDB). 앱을 껐다 켜도 유지된다.
-// 전체 데이터 모델은 docs/DESIGN.md 참고. Phase 1에서는 교재·목차·원문 페이지만 사용.
+// 전체 데이터 모델은 docs/DESIGN.md 참고.
 // 테이블을 추가할 때는 version(2).stores({...}) 처럼 버전을 올려서 추가한다 (기존 데이터 유지).
 import Dexie, { type Table } from 'dexie'
 import type { RawSentence, RawVocab, UnitContent } from './content'
@@ -62,6 +62,40 @@ export interface Sentence extends RawSentence {
   edited?: boolean
 }
 
+// ── Phase 3: 학습 기록 ──
+export type VocabGrade = 'again' | 'hard' | 'good' | 'easy' // 다시 / 어려움 / 알맞음 / 쉬움
+
+/** 답 하나하나의 기록 (ReviewHistory). Phase 4 복습 일정 계산과 Phase 5 통계의 원천 */
+export interface Review {
+  id?: number
+  itemType: 'vocab' | 'sentence'
+  itemId: string
+  unitId: string
+  date: string // 현지 날짜 YYYY-MM-DD
+  at: number
+  phase: 'new' | 'review' // 처음 학습 / 같은 날 틀린 것 다시
+  correct: boolean
+  grade?: VocabGrade
+  score?: number // 예문 점수 0~100
+  answer?: string // 예문 입력값
+  responseMs: number
+}
+
+export type Step = 'vocab' | 'vocab-intro' | 'vocab-review' | 'grammar' | 'sentence' | 'sentence-intro' | 'sentence-review' | 'done'
+
+/** 하루 루틴 1회 (StudySession). 진행 상태를 저장해 두었다가 앱을 다시 열면 이어서 한다 */
+export interface Session {
+  id?: number
+  key: string // `${unitId}#${partId ?? 'all'}`
+  unitId: string
+  partId?: string
+  date: string
+  startedAt: number
+  endedAt?: number // 있으면 완료
+  state: { step: Step; queue: string[]; i: number; wrongV: string[]; wrongS: string[]; tries: Record<string, number> }
+  stats: { vocab: number; vocabOk: number; sentences: number; sentencesOk: number; cards: number }
+}
+
 class StudyDB extends Dexie {
   books!: Table<Book, string>
   chapters!: Table<Chapter, string>
@@ -69,6 +103,8 @@ class StudyDB extends Dexie {
   units!: Table<Unit, string>
   vocab!: Table<Vocab, string>
   sentences!: Table<Sentence, string>
+  reviews!: Table<Review, number>
+  sessions!: Table<Session, number>
 
   constructor() {
     super('nihongo-study')
@@ -82,14 +118,19 @@ class StudyDB extends Dexie {
       vocab: 'id, unitId, bookId, ja',
       sentences: 'id, unitId, bookId',
     })
+    this.version(3).stores({
+      reviews: '++id, itemId, unitId, date',
+      sessions: '++id, key, unitId, date',
+    })
   }
 }
 
 export const db = new StudyDB()
 
 export async function deleteBook(bookId: string) {
-  await db.transaction('rw', [db.books, db.chapters, db.pages, db.units, db.vocab, db.sentences], async () => {
+  await db.transaction('rw', [db.books, db.chapters, db.pages, db.units, db.vocab, db.sentences, db.reviews, db.sessions], async () => {
     for (const t of [db.units, db.vocab, db.sentences]) await t.where('bookId').equals(bookId).delete()
+    for (const t of [db.reviews, db.sessions]) await t.where('unitId').startsWith(`${bookId}/`).delete()
     await db.pages.where('bookId').equals(bookId).delete()
     await db.chapters.where('bookId').equals(bookId).delete()
     await db.books.delete(bookId)

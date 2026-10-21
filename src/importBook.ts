@@ -13,7 +13,9 @@ export async function importBookPackage(file: File): Promise<string> {
   if (!raw) throw new Error('교재 패키지 오류: manifest.json이 없습니다 (pdf2pkg.py로 만든 .zip인지 확인)')
   const m = parseManifest(JSON.parse(new TextDecoder().decode(raw)))
 
-  if (await db.books.get(m.id)) throw new Error(`이미 등록된 교재입니다: ${m.title}`)
+  const existing = await db.books.get(m.id)
+  const hasPages = existing && (await db.pages.where('bookId').equals(m.id).count()) > 0
+  if (hasPages) throw new Error(`이미 등록된 교재입니다: ${m.title}`)
 
   const pages: SourcePage[] = []
   for (let p = 1; p <= m.pageCount; p++) {
@@ -29,6 +31,12 @@ export async function importBookPackage(file: File): Promise<string> {
     order,
     status: 'new',
   }))
+
+  // 백업에서 복구한 교재(진도·기록은 있고 이미지만 없음)는 이미지만 채운다
+  if (existing) {
+    await db.pages.bulkAdd(pages)
+    return m.id
+  }
 
   // 한 트랜잭션: 중간에 실패하면 아무것도 저장되지 않는다 (반쪽짜리 교재 방지)
   await db.transaction('rw', db.books, db.chapters, db.pages, async () => {

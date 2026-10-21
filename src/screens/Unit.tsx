@@ -71,12 +71,12 @@ function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence
 }
 
 // 원본 페이지를 카드 바로 아래에 펼쳐 대조 (두 번 탭하면 전체 화면 보기)
-function OriginalPage({ bookId, page }: { bookId: string; page: number }) {
+export function OriginalPage({ bookId, page }: { bookId: string; page: number }) {
   const url = usePageImage(bookId, page)
   return url ? <img className="orig-page" src={url} alt={`원본 ${page}쪽`} onDoubleClick={() => go(`/read/${bookId}/${page}`)} /> : null
 }
 
-function CardView({ c, sentences, offset, bookId }: { c: Card; sentences: Map<string, Sentence>; offset: number; bookId: string }) {
+export function CardView({ c, sentences, offset, bookId }: { c: Card; sentences: Map<string, Sentence>; offset: number; bookId: string }) {
   const [orig, setOrig] = useState(false)
   const ai = c.kind === 'teacher'
   return (
@@ -229,6 +229,13 @@ export default function UnitScreen({ bookId, cid }: { bookId: string; cid: strin
           <ul>{u.review.fixes.map((f, i) => <li key={i}>{f}</li>)}</ul>
         </details>
       )}
+      <div className="study-buttons">
+        {(u.parts ?? [{ id: '', title: '이 단원 학습하기' }]).map(p => (
+          <button key={p.id} className="btn primary" onClick={() => go(`/study/${bookId}/${cid}${p.id ? `/${p.id}` : ''}`)}>
+            {u.parts ? `${p.title} 학습` : p.title}
+          </button>
+        ))}
+      </div>
       <div className="seg">
         <button className={tab === 'cards' ? 'on' : ''} onClick={() => setTab('cards')}>문법 카드 {u.cards.length}</button>
         <button className={tab === 'vocab' ? 'on' : ''} onClick={() => setTab('vocab')}>단어 {visibleVocab.length}</button>

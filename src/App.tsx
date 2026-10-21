@@ -5,6 +5,7 @@ import BookDetail from './screens/BookDetail'
 import Reader from './screens/Reader'
 import Settings from './screens/Settings'
 import UnitScreen from './screens/Unit'
+import Study from './screens/Study'
 
 // 주소 뒤 #/... 로 화면을 구분하는 간단한 라우터 (뒤로가기 버튼이 그대로 동작)
 export const go = (path: string) => { location.hash = path }
@@ -34,10 +35,11 @@ const TABS = [
 ]
 
 export default function App() {
-  const [screen, a, b] = useRoute()
+  const [screen, a, b, c] = useRoute()
 
-  // 읽기 화면은 탭 바 없이 전체 화면
+  // 읽기·학습 화면은 탭 바 없이 전체 화면
   if (screen === 'read' && a) return <Reader bookId={a} page={Number(b) || 1} />
+  if (screen === 'study' && a && b) return <Study key={`${b}/${c}`} bookId={a} cid={b} partId={c} />
 
   const page =
     screen === 'library' ? <Library /> :
