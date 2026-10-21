@@ -13,7 +13,7 @@
 4. 저장소 주소(예: `https://github.com/내아이디/nihongo-study`)를 Claude Code에게 알려 주세요.
    Claude가 코드를 올릴 때 **GitHub 로그인 창**이 뜨면 직접 로그인합니다.
 
-올린 뒤 2~3분 지나면 앱 주소가 생깁니다: `https://내아이디.github.io/nihongo-study/`
+앱 주소: **https://rw0414.github.io/nihongo-study/** (코드를 올리면 2~3분 뒤 자동으로 새 버전이 반영돼요)
 
 ## 2. 폰에 앱 설치
 
