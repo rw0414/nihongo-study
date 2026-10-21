@@ -4,6 +4,7 @@ import Library from './screens/Library'
 import BookDetail from './screens/BookDetail'
 import Reader from './screens/Reader'
 import Settings from './screens/Settings'
+import UnitScreen from './screens/Unit'
 
 // 주소 뒤 #/... 로 화면을 구분하는 간단한 라우터 (뒤로가기 버튼이 그대로 동작)
 export const go = (path: string) => { location.hash = path }
@@ -41,9 +42,10 @@ export default function App() {
   const page =
     screen === 'library' ? <Library /> :
     screen === 'book' && a ? <BookDetail bookId={a} /> :
+    screen === 'unit' && a && b ? <UnitScreen bookId={a} cid={b} /> :
     screen === 'settings' ? <Settings /> :
     <Home />
-  const active = screen === 'book' ? '/library' : `/${screen ?? ''}`
+  const active = screen === 'book' || screen === 'unit' ? '/library' : `/${screen ?? ''}`
 
   return (
     <div className="app">

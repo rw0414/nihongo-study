@@ -1,26 +1,38 @@
+import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, deleteBook, type Book, type Chapter } from '../db'
+import { db, deleteBook, type Book, type Chapter, type Unit as UnitRow } from '../db'
 import { chapterAt, leafChapters, printedPage, progress } from '../book'
+import { importUnitFiles } from '../importBook'
 import { go } from '../App'
 
 const STATUS = { new: '', reading: '학습 중', done: '완료' }
 
-function Unit({ c, book, current }: { c: Chapter; book: Book; current: boolean }) {
+// 변환된 단원은 콘텐츠 화면으로, 아직이면 원본 페이지로 연다
+function Unit({ c, book, current, content }: { c: Chapter; book: Book; current: boolean; content?: UnitRow }) {
+  const cid = c.id.slice(book.id.length + 1)
   return (
-    <button className={`toc-unit ${current ? 'current' : ''}`} onClick={() => go(`/read/${book.id}/${c.startPage}`)}>
+    <button className={`toc-unit ${current ? 'current' : ''}`}
+      onClick={() => go(content ? `/unit/${book.id}/${cid}` : `/read/${book.id}/${c.startPage}`)}>
       <div className="grow">
         <div className="t">{c.title}</div>
-        <div className="muted small">p.{printedPage(c.startPage, book.printedPageOffset)} · {c.endPage - c.startPage + 1}쪽</div>
+        <div className="muted small">
+          {content ? `문법 ${content.data.grammar.length} · 예문 ${content.data.sentences.length} · ` : ''}
+          p.{printedPage(c.startPage, book.printedPageOffset)} · {c.endPage - c.startPage + 1}쪽
+        </div>
       </div>
+      {content && <span className={`tag ${content.status === 'checked' ? 'info' : 'warn'}`}>{content.status === 'checked' ? '검토 완료' : '검토 필요'}</span>}
       {c.status !== 'new' && <span className={`tag ${c.status}`}>{STATUS[c.status]}</span>}
     </button>
   )
 }
 
 export default function BookDetail({ bookId }: { bookId: string }) {
-  const book = useLiveQuery(() => db.books.get(bookId), [bookId])
+  const book = useLiveQuery(() => db.books.get(bookId).then(b => b ?? null), [bookId]) // null = 없음, undefined = 불러오는 중
   const chapters = useLiveQuery(() => db.chapters.where('[bookId+order]').between([bookId, 0], [bookId, Infinity]).toArray(), [bookId])
-  if (book === undefined || !chapters) return null
+  const units = useLiveQuery(async () => new Map((await db.units.where('bookId').equals(bookId).toArray()).map(u => [u.id, u])), [bookId])
+  const input = useRef<HTMLInputElement>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string }>()
+  if (book === undefined || !chapters || !units) return null
   if (!book) return <p>교재를 찾을 수 없습니다.</p>
 
   const leaves = leafChapters(chapters)
@@ -29,6 +41,17 @@ export default function BookDetail({ bookId }: { bookId: string }) {
   const children = (id: string) => chapters.filter(c => c.parentId === id)
   const here = book.lastOpenedAt ? chapterAt(chapters, book.lastPage) : undefined
   const contains = (c: Chapter) => !!here && c.startPage <= here.startPage && here.endPage <= c.endPage
+
+  async function importContent(files: File[]) {
+    if (!files.length) return
+    try {
+      const n = await importUnitFiles(files)
+      setMsg({ ok: true, text: `단원 ${n}개의 콘텐츠를 가져왔어요.` })
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message })
+    }
+    if (input.current) input.current.value = ''
+  }
 
   async function remove() {
     if (!confirm(`'${book!.title}'을(를) 삭제할까요? 교재 이미지와 진도 기록이 모두 지워집니다.`)) return
@@ -55,17 +78,17 @@ export default function BookDetail({ bookId }: { bookId: string }) {
       <div className="toc">
         {chapters.filter(c => c.level === 0).map(part => {
           const kids = children(part.id)
-          if (!kids.length) return <Unit key={part.id} c={part} book={book} current={here?.id === part.id} />
+          if (!kids.length) return <Unit key={part.id} c={part} book={book} current={here?.id === part.id} content={units.get(part.id)} />
           return (
             <details key={part.id} open={contains(part)}>
               <summary><span className="grow">{part.title}</span><span className="muted small">{leaves.filter(l => l.startPage >= part.startPage && l.endPage <= part.endPage).length}개</span></summary>
               {kids.map(sec => {
-                const units = children(sec.id)
-                if (!units.length) return <Unit key={sec.id} c={sec} book={book} current={here?.id === sec.id} />
+                const leafs = children(sec.id)
+                if (!leafs.length) return <Unit key={sec.id} c={sec} book={book} current={here?.id === sec.id} content={units.get(sec.id)} />
                 return (
                   <div key={sec.id}>
                     <div className="toc-section">{sec.title}</div>
-                    {units.map(u => <Unit key={u.id} c={u} book={book} current={here?.id === u.id} />)}
+                    {leafs.map(u => <Unit key={u.id} c={u} book={book} current={here?.id === u.id} content={units.get(u.id)} />)}
                   </div>
                 )
               })}
@@ -73,6 +96,9 @@ export default function BookDetail({ bookId }: { bookId: string }) {
           )
         })}
       </div>
+      <button className="btn dashed wide" onClick={() => input.current?.click()}>+ 단원 콘텐츠 가져오기 (.json)</button>
+      <input ref={input} type="file" accept=".json,application/json" multiple hidden onChange={e => importContent([...(e.target.files ?? [])])} />
+      {msg && <p className={msg.ok ? 'ok' : 'error'}>{msg.text}</p>}
       <button className="btn danger wide" onClick={remove}>교재 삭제</button>
     </>
   )

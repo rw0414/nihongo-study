@@ -7,7 +7,7 @@ import { go } from '../App'
 
 // 원본 페이지 보기. 좌우 스와이프 또는 하단 버튼으로 넘김, 이미지를 두 번 탭하면 확대.
 export default function Reader({ bookId, page }: { bookId: string; page: number }) {
-  const book = useLiveQuery(() => db.books.get(bookId), [bookId])
+  const book = useLiveQuery(() => db.books.get(bookId).then(b => b ?? null), [bookId]) // null = 없음, undefined = 불러오는 중
   const chapters = useLiveQuery(() => db.chapters.where('bookId').equals(bookId).toArray(), [bookId])
   const url = usePageImage(bookId, page)
   const [zoom, setZoom] = useState(false)
@@ -25,7 +25,8 @@ export default function Reader({ bookId, page }: { bookId: string; page: number 
     if (chapter?.status === 'new') db.chapters.update(chapter.id, { status: 'reading' })
   }, [chapter])
 
-  if (!book) return null
+  if (book === undefined) return null
+  if (!book) return <p style={{ padding: 20 }}>교재를 찾을 수 없습니다. 라이브러리에서 다시 추가해 주세요.</p>
   const move = (p: number) => {
     if (p >= 1 && p <= book.pageCount) location.replace(`#/read/${bookId}/${p}`) // 쪽 이동은 뒤로가기 기록에 쌓지 않음
   }
