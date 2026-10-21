@@ -53,10 +53,12 @@ export async function importBookPackage(file: File): Promise<string> {
   return m.id
 }
 
-/** 단원 콘텐츠(.json) 가져오기. 여러 파일을 한 번에 받을 수 있다. 가져온 단원 수를 돌려준다. */
+/** 단원 콘텐츠(.json) 가져오기. 단원 파일 여러 개 또는 묶음 파일({ units: [...] }, tools/bundle_content.py)을 받는다.
+ *  가져온 단원 수를 돌려준다. */
 export async function importUnitFiles(files: File[]): Promise<number> {
   // 전부 먼저 검증하고 나서 저장 (하나라도 틀리면 아무것도 저장하지 않음)
-  const units = await Promise.all(files.map(async f => parseUnit(JSON.parse(await f.text()))))
+  const docs = await Promise.all(files.map(async f => JSON.parse(await f.text()) as { units?: unknown[] }))
+  const units = docs.flatMap(d => (Array.isArray(d.units) ? d.units : [d])).map(parseUnit)
   for (const u of units) {
     const ch = await db.chapters.get(`${u.bookId}/${u.chapterId}`)
     if (!ch) throw new Error(`콘텐츠 파일 오류: 등록된 교재에 단원 ${u.chapterId}가 없습니다 (교재를 먼저 추가하세요)`)
