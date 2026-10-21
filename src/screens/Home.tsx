@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { dayKey, nextDay, streak } from '../study'
 import { go } from '../App'
+import InstallCard from '../InstallCard'
 
 const today = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })
 const STEPS = ['단어 암기', '문법 카드', '예문 작성']
@@ -23,6 +24,7 @@ export default function Home() {
     return (
       <>
         <h1>오늘의 학습</h1>
+        <InstallCard />
         <div className="card">
           <p style={{ marginTop: 0 }}>아직 등록된 교재가 없습니다.</p>
           <button className="btn primary" onClick={() => go('/library')}>라이브러리로 가기</button>
@@ -61,6 +63,7 @@ export default function Home() {
         <span className="streak">🔥 {days}일 연속</span>
       </div>
 
+      <InstallCard />
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {next ? (
           <>
