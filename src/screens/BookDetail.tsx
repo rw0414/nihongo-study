@@ -7,12 +7,12 @@ import { go } from '../App'
 
 const STATUS = { new: '', reading: '학습 중', done: '완료' }
 
-// 변환된 단원은 콘텐츠 화면으로, 아직이면 원본 페이지로 연다
+// 목차는 PDF 책갈피처럼: 누르면 그 단원의 원본 페이지로. 변환된 단원은 '학습 내용'으로 콘텐츠 화면도 열 수 있다
 function Unit({ c, book, current, content }: { c: Chapter; book: Book; current: boolean; content?: UnitRow }) {
   const cid = c.id.slice(book.id.length + 1)
   return (
-    <button className={`toc-unit ${current ? 'current' : ''}`}
-      onClick={() => go(content ? `/unit/${book.id}/${cid}` : `/read/${book.id}/${c.startPage}`)}>
+    <div className={`toc-unit ${current ? 'current' : ''}`} role="button" tabIndex={0}
+      onClick={() => go(`/read/${book.id}/${c.startPage}`)}>
       <div className="grow">
         <div className="t">{c.title}</div>
         <div className="muted small">
@@ -20,9 +20,9 @@ function Unit({ c, book, current, content }: { c: Chapter; book: Book; current: 
           p.{printedPage(c.startPage, book.printedPageOffset)} · {c.endPage - c.startPage + 1}쪽
         </div>
       </div>
-      {content && <span className={`tag ${content.status === 'checked' ? 'info' : 'warn'}`}>{content.status === 'checked' ? '검토 완료' : '검토 필요'}</span>}
       {c.status !== 'new' && <span className={`tag ${c.status}`}>{STATUS[c.status]}</span>}
-    </button>
+      {content && <button className="btn mini" onClick={e => { e.stopPropagation(); go(`/unit/${book.id}/${cid}`) }}>학습 내용</button>}
+    </div>
   )
 }
 

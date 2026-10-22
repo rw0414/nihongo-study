@@ -43,4 +43,8 @@ describe('정답률·응답 시간', () => {
   it('평균 응답 시간은 2분 넘는 답 제외', () => expect(avgResponse(rs, 'sentence')).toBe(9))
   it('처음 본 날 기준 학습 수', () => expect(learnedByDay([rev('2026-10-19', 1, 'vocab', true, 'new', 'a'), rev('2026-10-20', 2, 'vocab', true, 'review', 'a'), rev('2026-10-20', 3, 'vocab', true, 'new', 'b')], 'vocab'))
     .toEqual(new Map([['2026-10-19', 1], ['2026-10-20', 1]])))
+  it('실제 학습 시간이 있으면 그것만 셈', () => {
+    const s = { key: 'k', unitId: 'u', date: '2026-10-22', startedAt: 0, endedAt: 3600000, activeMs: 300000, state: {} as never, stats: {} as never }
+    expect(minutesByDay([s], []).get('2026-10-22')).toBe(5)
+  })
 })

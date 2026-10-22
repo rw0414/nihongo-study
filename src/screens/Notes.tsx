@@ -52,7 +52,6 @@ export default function Notes() {
   const recoveringN = wrong.filter(s => recovery(s) === 'recovering').length
   const dueN = sched.filter(s => s.due <= today && s.lastDate !== today).length
   const weakN = wrong.filter(s => recovery(s) === 'weak' || recovery(s) === 'recovering').length
-  const asks = [...sents.values()].filter(x => x.teacherAsk?.length)
 
   /** 사용자가 다시 학습 대상으로 지정: 오늘 복습에 나오게 */
   const relearn = (ids: string[]) =>
@@ -157,19 +156,6 @@ export default function Notes() {
         </div>
       )}
       {body}
-      {filter !== 'grammar' && filter !== 'vocab' && asks.length > 0 && (
-        <section className="card list-card">
-          <div className="list-title">선생님 확인 요청 <span className="muted small">{asks.length}개 · Claude Code에서 검토해요</span></div>
-          {asks.map(st => (
-            <div key={st.id} className="item-col">
-              <div style={{ fontWeight: 500 }}>{st.ko}</div>
-              {st.teacherAsk!.map(a => <div key={a} className="jp ans">내 답: {a}</div>)}
-              <div className="jp muted small">교재 정답: {st.answers[0]}</div>
-              <button className="link small" onClick={() => db.sentences.update(st.id, { teacherAsk: [] })}>요청 취소</button>
-            </div>
-          ))}
-        </section>
-      )}
       <button className="btn primary wide big" disabled={weakN === 0} onClick={() => go(`/review/${book.id}`)}>
         오답만 학습하기 ({weakN})
       </button>

@@ -25,7 +25,7 @@ function Hl({ text, hl }: { text: string; hl?: string }) {
   return <><Ja text={text.slice(0, i)} /><b className="hl"><Ja text={hl!} /></b><Ja text={text.slice(i + hl!.length)} /></>
 }
 
-function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence> }) {
+function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence> }): JSX.Element | null {
   switch (b.t) {
     case 'p': return <p className="blk-p"><Ja text={b.text} /></p>
     case 'h': return <div className="blk-h"><Ja text={b.text} /></div>
@@ -76,7 +76,8 @@ export function OriginalPage({ bookId, page }: { bookId: string; page: number })
   return url ? <img className="orig-page" src={url} alt={`원본 ${page}쪽`} onDoubleClick={() => go(`/read/${bookId}/${page}`)} /> : null
 }
 
-export function CardView({ c, sentences, offset, bookId }: { c: Card; sentences: Map<string, Sentence>; offset: number; bookId: string }) {
+/** noQ: 학습 중 문법 카드에서는 문제(q)를 빼고 보여 줌 (문제는 3단계 예문 작성에서) */
+export function CardView({ c, sentences, offset, bookId, noQ }: { c: Card; sentences: Map<string, Sentence>; offset: number; bookId: string; noQ?: boolean }) {
   const [orig, setOrig] = useState(false)
   const ai = c.kind === 'teacher'
   return (
@@ -89,7 +90,7 @@ export function CardView({ c, sentences, offset, bookId }: { c: Card; sentences:
       {orig && <OriginalPage bookId={bookId} page={c.page} />}
       <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></div>
       {c.sub && <div className="lc-sub">{c.sub}</div>}
-      {c.blocks.map((b, i) => <BlockView key={i} b={b} sentences={sentences} />)}
+      {c.blocks.filter(b => !noQ || b.t !== 'q').map((b, i) => <BlockView key={i} b={b} sentences={sentences} />)}
     </section>
   )
 }

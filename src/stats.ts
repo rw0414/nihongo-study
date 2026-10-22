@@ -4,10 +4,11 @@ import { addDays } from './srs'
 
 const CAP_MS = 90 * 60000 // 세션 하나를 최대 90분으로 (켜 두고 자리를 비운 경우)
 
-/** 일별 학습 시간(분). 세션 시작~끝, 끝나지 않은 세션은 그 사이 마지막 답까지 */
+/** 일별 학습 시간(분). 실제 학습 시간(activeMs)이 있으면 그것, 옛 기록은 세션 시작~끝(끝나지 않았으면 마지막 답까지) */
 export function minutesByDay(sessions: Session[], reviews: Review[]): Map<string, number> {
   const out = new Map<string, number>()
   for (const s of sessions) {
+    if (s.activeMs !== undefined) { out.set(s.date, (out.get(s.date) ?? 0) + s.activeMs / 60000); continue }
     const end = s.endedAt ?? Math.max(s.startedAt, ...reviews.filter(r => r.date === s.date && r.at >= s.startedAt).map(r => r.at))
     const ms = Math.min(Math.max(end - s.startedAt, 0), CAP_MS)
     out.set(s.date, (out.get(s.date) ?? 0) + ms / 60000)

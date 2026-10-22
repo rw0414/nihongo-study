@@ -1,12 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, getSettings } from '../db'
+import { db, getSettings, STAGES, type Stage } from '../db'
 import { doneDays, minutesByDay } from '../stats'
 import { dayKey, nextDay, streak } from '../study'
 import { go } from '../App'
 import InstallCard from '../InstallCard'
 
 const today = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })
-const STEPS = ['단어 암기', '문법 카드', '예문 작성']
 
 export default function Home() {
   const book = useLiveQuery(() => db.books.orderBy('lastOpenedAt').reverse().first().then(b => b ?? db.books.toCollection().first()).then(b => b ?? null))
@@ -48,8 +47,15 @@ export default function Home() {
   const next = open
     ? { unitId: open.unitId, partId: open.partId, title: data.chapters.find(c => c.id === open.unitId)?.title ?? '', partTitle: data.units.get(open.unitId)?.data.parts?.find(p => p.id === open.partId)?.title }
     : nextDay(data.chapters, data.units, new Set(done.map(s => s.key)))
-  const stage = !open ? -1 : ({ vocab: 0, 'vocab-intro': 0, 'vocab-review': 0, grammar: 1, sentence: 2, 'sentence-intro': 2, 'sentence-review': 2, done: 3 } as const)[open.state.step]
-  const start = () => next && go(`/study/${book.id}/${next.unitId.slice(book.id.length + 1)}${next.partId ? `/${next.partId}` : ''}`)
+  // 단계별 진행: 옛 기록(pos 없음)은 지금 단계 앞을 끝난 것으로
+  const cur = open?.state.stage ?? (open ? (open.state.step.startsWith('vocab') ? 'vocab' : open.state.step === 'grammar' ? 'grammar' : 'sentence') : undefined)
+  const prog = (x: Stage) => {
+    if (!open) return { done: false, text: '' }
+    const c = x === cur ? open.state : open.state.pos?.[x]
+    if (!c) return { done: !open.state.pos && STAGES.indexOf(x) < STAGES.indexOf(cur!), text: '' }
+    return { done: c.step === 'done', text: c.step === 'done' ? '' : c.queue.length ? `${Math.min(c.i + 1, c.queue.length)}/${c.queue.length}` : '' }
+  }
+  const start = (s?: Stage) => next && go(`/study/${book.id}/${next.unitId.slice(book.id.length + 1)}${next.partId ? `/${next.partId}` : ''}${s ? `/${s}` : ''}`)
 
   // 이번 주 (월~일) 학습한 날
   const week = (() => {
@@ -86,15 +92,18 @@ export default function Home() {
               <div className="blk-note">오늘 복습할 때가 된 단어 {data.dueV}개 · 예문 {data.dueS}개가 학습 중에 함께 나와요.</div>
             )}
             <div className="steps">
-              {STEPS.map((s, i) => (
-                <div className={`step ${i === stage ? 'now' : ''}`} key={s}>
-                  <div className={`num ${i < stage ? 'done' : ''}`}>{i < stage ? '✓' : i + 1}</div>
-                  <div className="grow" style={{ fontWeight: 500 }}>{s}</div>
-                  {i === stage && <span className="accent-text small"><b>진행 중</b></span>}
-                </div>
-              ))}
+              {STAGES.map((s, i) => {
+                const p = prog(s)
+                return (
+                  <button className={`step ${s === cur ? 'now' : ''}`} key={s} onClick={() => start(s)}>
+                    <div className={`num ${p.done ? 'done' : ''}`}>{p.done ? '✓' : i + 1}</div>
+                    <div className="grow" style={{ fontWeight: 500 }}>{({ vocab: '단어 암기', grammar: '문법 카드', sentence: '예문 작성' } as const)[s]}</div>
+                    <span className={`small ${s === cur ? 'accent-text' : 'muted'}`}>{p.done ? '완료' : p.text ? <b>{p.text}</b> : '›'}</span>
+                  </button>
+                )
+              })}
             </div>
-            <button className="btn primary wide big" onClick={start}>{open ? '이어서 학습하기' : doneToday.length ? '다음 학습 시작' : '오늘의 학습 시작'}</button>
+            <button className="btn primary wide big" onClick={() => start()}>{open ? '이어서 학습하기' : doneToday.length ? '다음 학습 시작' : '오늘의 학습 시작'}</button>
           </>
         ) : (
           <>
@@ -113,7 +122,6 @@ export default function Home() {
         </div>
       </div>
 
-      <button className="btn wide" onClick={() => go(`/read/${book.id}/${book.lastPage}`)}>원본 이어서 보기</button>
     </>
   )
 }

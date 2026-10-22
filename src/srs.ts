@@ -99,3 +99,34 @@ export function relatedPicks(
   if (wrong < 2) return []
   return same.filter(s => !sched.has(s.id)).slice(0, n).map(s => s.id)
 }
+
+// ── 단어: 안키(Anki) 기본 설정과 같은 주기, 버튼은 '모름(Again)'·'알고 있음(Good)' 두 개 ──
+//  새 단어: 학습 단계 1분·10분 → 두 번 연속 알고 있음이면 졸업, 1일 뒤
+//  복습 단어: 알고 있음 → 간격 × ease(기본 2.5), 최소 +1일 / 모름 → ease −0.2(최소 1.3), 다시 학습 1단계(10분) 후 1일 뒤
+//  학습 단계(분 단위)는 같은 학습 안에서 대기열 뒤로 다시 보내는 것으로 대신한다.
+
+/** 학습 안에서 아직 졸업하지 않은 단어. left = 남은 '알고 있음' 횟수, practice = 오늘 이미 일정을 반영한 연습 */
+export interface Learn { steps: number; left: number; wrong: boolean; practice?: boolean }
+
+const finish = (s: Sched, ok: boolean, today: string): Sched => ({
+  ...s, wrongCount: s.wrongCount + (ok ? 0 : 1), correctCount: s.correctCount + (ok ? 1 : 0), streak: ok ? s.streak + 1 : 0,
+  lastGrade: ok ? 'good' : 'again', lastDate: today, due: addDays(today, s.interval),
+})
+
+/** 단어 답 하나. learn이 남으면 같은 학습에서 다시 낸다 */
+export function vocabAnswer(prev: Sched, learn: Learn | undefined, know: boolean, today: string): { sched: Sched; learn?: Learn } {
+  if (!learn) {
+    if (prev.lastDate === today) learn = { steps: 1, left: 1, wrong: false, practice: true } // 오늘 이미 끝낸 단어(오답만 학습 등)
+    else if (prev.reps > 0) {
+      if (know) return { sched: finish({ ...prev, reps: prev.reps + 1, interval: Math.max(prev.interval + 1, Math.round(prev.interval * prev.ease)) }, true, today) }
+      // 잊음: 다시 학습. 중간에 그만둬도 내일 다시 나오도록 일정부터 바꿔 둔다
+      const s = { ...prev, lapses: prev.lapses + 1, reps: 0, interval: 1, ease: Math.max(1.3, prev.ease - 0.2), due: addDays(today, 1) }
+      return { sched: s, learn: { steps: 1, left: 1, wrong: true } }
+    } else learn = { steps: 2, left: 2, wrong: false } // 새 단어
+  }
+  if (!know) return { sched: prev, learn: { ...learn, left: learn.steps, wrong: true } }
+  const left = learn.left - 1
+  if (left > 0) return { sched: prev, learn: { ...learn, left } }
+  if (learn.practice) return { sched: prev }
+  return { sched: finish({ ...prev, reps: 1, interval: 1 }, !learn.wrong, today) } // 졸업
+}

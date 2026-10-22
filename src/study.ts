@@ -29,7 +29,7 @@ export function dayContent(u: UnitContent, partId?: string): DayContent {
 }
 
 type VocabLike = { id: string; origin: string; page?: number; approved?: boolean }
-type SentenceLike = { id: string; grammar: string[]; page: number }
+type SentenceLike = { id: string; grammar: string[]; page: number; src?: string; answers?: string[] }
 
 /** 오늘 외울 단어: 교재 단어 목록 + 승인된 AI 제안 (본문에서 모은 단어는 단원 화면에서만 참고) */
 export function pickVocab<V extends VocabLike>(all: V[], day: DayContent, isLastPart: boolean): V[] {
@@ -41,12 +41,42 @@ export function pickVocab<V extends VocabLike>(all: V[], day: DayContent, isLast
   })
 }
 
-/** 오늘 쓸 예문: 오늘 카드가 참조하는 문제 + 오늘 문법의 본문 예문 */
+/** 오늘 쓸 예문: 오늘 카드가 참조하는 문제 + 오늘 문법의 본문 예문. 실력 다지기 중 본문 예문과 정답이 같은 문제는 뺀다 */
 export function pickSentences<S extends SentenceLike>(all: S[], day: DayContent, unitId: string): S[] {
+  const ex = new Set(all.filter(s => s.src === 'example').flatMap(s => (s.answers ?? []).map(normalize)))
   return all.filter(s => {
     const raw = s.id.slice(unitId.length + 1)
+    if (s.src === 'drill' && s.answers?.some(a => ex.has(normalize(a)))) return false
     return day.sentenceRefs.has(raw) || (raw.startsWith('s-e') && s.grammar.some(g => day.grammarIds.has(g)))
   })
+}
+
+// ── 맛보기 연습: 단어 블록 배열 ──
+
+// 앞 블록에 붙이는 활용 어미 (단어 분리기가 だっ|た, ありま|せん 처럼 잘게 나누는 것)
+const TAIL = new Set(['っ', 'た', 'て', 'ます', 'まし', 'ませ', 'ましょ', 'う', 'ん', 'せん', 'かっ', 'なかっ', 'ない', 'たい'])
+
+/** 정답 문장을 단어·조사 블록으로 (기기 내장 일본어 단어 분리 + 활용 어미 붙이기) */
+export function chunks(answer: string): string[] {
+  const seg = new Intl.Segmenter('ja', { granularity: 'word' })
+  const out: string[] = []
+  for (const { segment: t, isWordLike } of seg.segment(answer.replace(IGNORE, ''))) {
+    if (!isWordLike && !/[ぁ-ゟ゠-ヿ一-鿿]/.test(t)) continue
+    const prev = out.at(-1)
+    const hira = !!prev && /[ぁ-ゟ]$/.test(prev)
+    if (prev && ((hira && TAIL.has(t)) || (/[っん]$/.test(prev) && /^[てたでだ]$/.test(t)) || (prev.endsWith('で') && t === 'した'))) out[out.length - 1] += t
+    else out.push(t)
+  }
+  return out
+}
+
+/** 섞기 (원래 순서와 같으면 한 번 더) */
+export function shuffle<T>(a: T[]): T[] {
+  for (let k = 0; k < 5; k++) {
+    const b = [...a].sort(() => Math.random() - 0.5)
+    if (a.length < 2 || b.some((x, i) => x !== a[i])) return b
+  }
+  return [...a].reverse()
 }
 
 // ── 예문 채점 ──

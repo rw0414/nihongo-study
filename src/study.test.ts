@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dayContent, diff, grade, nextDay, normalize, pickSentences, pickVocab, streak } from './study'
+import { dayContent, diff, grade, nextDay, normalize, pickSentences, pickVocab, streak, chunks, shuffle } from './study'
 import type { UnitContent } from './content'
 
 const s = { answers: ['妻は主婦ではありません。'], alts: ['妻は主婦じゃありません。'], kana: ['つまはしゅふではありません。', 'つまはしゅふじゃありません。'] }
@@ -85,4 +85,25 @@ describe('유연한 로컬 채점', () => {
   it('다른 명사를 쓰면 기타(단어)', () => expect(grade('主人は日本人じゃありません', s2).findings[0].kind).toBe('단어'))
   it('가나로 쓰다 틀려도 가나끼리 비교해서 정확히 짚음', () => expect(grade('しゅじんはかいこくじんじゃありません', s2, R).findings[0].kind).toBe('탁음'))
   it('조사만 틀리면 조사', () => expect(grade('主人が外国人じゃありません', s2).errorType).toBe('조사'))
+})
+
+describe('맛보기 블록', () => {
+  it('단어·조사로 나누고 활용 어미는 붙임', () => {
+    expect(chunks('これは辞書だ。')).toEqual(['これ', 'は', '辞書', 'だ'])
+    expect(chunks('夜の外出は危険だった')).toEqual(['夜', 'の', '外出', 'は', '危険', 'だった'])
+    expect(chunks('祖母は不幸じゃありません')).toEqual(['祖母', 'は', '不幸', 'じゃ', 'ありません'])
+    expect(chunks('その国は安全じゃなかった').join('|')).toMatch(/なかった$/)
+    expect(chunks('その メールは迷惑でした').slice(-1)).toEqual(['でした'])
+  })
+  it('섞으면 순서가 바뀜', () => expect(shuffle(['a', 'b', 'c'])).not.toEqual(['a', 'b', 'c']))
+})
+
+describe('실력 다지기 중복 제거', () => {
+  const day = { cards: [], pages: [1, 1] as [number, number], grammarIds: new Set(['g1']), sentenceRefs: new Set(['s-d1', 's-d2']) }
+  const all = [
+    { id: 'u/s-e1', src: 'example', grammar: ['g1'], page: 1, answers: ['これは本だ。'] },
+    { id: 'u/s-d1', src: 'drill', grammar: [], page: 1, answers: ['これは 本だ'] },
+    { id: 'u/s-d2', src: 'drill', grammar: [], page: 1, answers: ['それは本だ'] },
+  ]
+  it('본문 예문과 같은 실력 다지기 문제는 빠짐', () => expect(pickSentences(all, day, 'u').map(s => s.id)).toEqual(['u/s-e1', 'u/s-d2']))
 })

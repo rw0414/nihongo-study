@@ -3,7 +3,7 @@
 // 테이블을 추가할 때는 version(2).stores({...}) 처럼 버전을 올려서 추가한다 (기존 데이터 유지).
 import Dexie, { type Table } from 'dexie'
 import type { RawSentence, RawVocab, UnitContent } from './content'
-import { newSched, review as applyReview, sentenceGrade, type Sched } from './srs'
+import { newSched, review as applyReview, sentenceGrade, type Learn, type Sched } from './srs'
 
 export interface Book {
   id: string // 원본 PDF의 SHA-256 앞 16자리 → 같은 PDF 중복 등록 방지
@@ -85,6 +85,10 @@ export interface Review {
 }
 
 export type Step = 'vocab' | 'vocab-intro' | 'vocab-review' | 'grammar' | 'sentence' | 'sentence-intro' | 'sentence-review' | 'done'
+/** 하루 루틴의 세 단계. 홈에서 원하는 단계부터 골라서 할 수 있고, 단계마다 진행 위치를 따로 기억한다 */
+export type Stage = 'vocab' | 'grammar' | 'sentence'
+export const STAGES: Stage[] = ['vocab', 'grammar', 'sentence']
+export interface Cursor { step: Step; queue: string[]; i: number } // step 'done' = 그 단계 끝
 
 /** 하루 루틴 1회 (StudySession). 진행 상태를 저장해 두었다가 앱을 다시 열면 이어서 한다 */
 export interface Session {
@@ -96,8 +100,10 @@ export interface Session {
   startedAt: number
   endedAt?: number // 있으면 완료
   // wrongV/S = 오늘 틀린 것, dueV/S = 복습할 때가 된 것 (시작할 때 정해 둠)
-  state: { step: Step; queue: string[]; i: number; wrongV: string[]; wrongS: string[]; dueV?: string[]; dueS?: string[]; tries: Record<string, number> }
+  // step/queue/i = 지금 보고 있는 단계의 위치 (옛 기록 호환), pos = 단계별 위치, learn = 아직 외우는 중인 단어(안키 학습 단계)
+  state: { step: Step; queue: string[]; i: number; stage?: Stage; pos?: Partial<Record<Stage, Cursor>>; learn?: Record<string, Learn>; wrongV: string[]; wrongS: string[]; dueV?: string[]; dueS?: string[]; tries: Record<string, number> }
   stats: { vocab: number; vocabOk: number; sentences: number; sentencesOk: number; cards: number }
+  activeMs?: number // 실제로 학습한 시간 (화면이 켜져 있고 1분 안에 조작한 시간만)
 }
 
 class StudyDB extends Dexie {

@@ -273,3 +273,53 @@ rt { font-size: 0.5em; color: var(--muted); font-weight: 400; letter-spacing: 0;
 .verdict-why { font-size: 14px; line-height: 1.5; }
 details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 details.more { display: flex; flex-direction: column; gap: 6px; }
+
+/* 홈 단계 버튼 · 목차 */
+button.step { width: 100%; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.toc-unit { cursor: pointer; }
+
+/* 단어 카드 스와이프 (26초식) */
+.swipe-area { position: relative; flex: 1; display: flex; min-height: 380px; }
+.swipe-area .flash-card { flex: 1; }
+.flash-card.ghost { position: absolute; inset: 0; transform: translateY(10px) scale(.95); opacity: .55; z-index: 0; }
+.flash-card.swipe { position: relative; z-index: 1; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; will-change: transform; animation: card-in .28s cubic-bezier(.2, .9, .3, 1.2) both; }
+.swipe-label { position: absolute; top: 56px; padding: 6px 14px; border-radius: 12px; font-weight: 800; font-size: 20px; border: 3px solid; pointer-events: none; transition: opacity .1s; }
+.swipe-label.know { left: 18px; color: var(--accent); border-color: var(--accent); transform: rotate(-12deg); }
+.swipe-label.dont { right: 18px; color: var(--warn); border-color: var(--warn); transform: rotate(12deg); }
+.flash-back { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 12px; animation: fade-up .25s ease both; }
+.hanja-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.hanja { background: var(--surface-2); border-radius: 10px; padding: 4px 10px; font-size: 14px; }
+.hanja b { font-size: 17px; margin-right: 2px; }
+.know-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.know-row .btn { height: 58px; font-weight: 700; font-size: 17px; }
+
+/* 맛보기 연습: 블록 배열 (HeyJapan식) */
+.block-line { min-height: 64px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; padding: 12px 4px; border-bottom: 2px solid var(--line); }
+.block-bank { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 8px 0; }
+.chip-block { font: inherit; font-size: 19px; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); border-bottom-width: 4px; background: var(--surface); color: var(--ink); cursor: pointer; transition: transform .12s, opacity .15s; }
+.chip-block.on { animation: pop .2s ease both; border-color: var(--accent); }
+.chip-block.used { opacity: .25; border-style: dashed; }
+.chip-block rt { font-size: .5em; }
+
+/* 전환 애니메이션 (말해보카식) */
+.step-anim { flex: 1; display: flex; flex-direction: column; gap: 12px; animation: slide-in .3s cubic-bezier(.2, .8, .2, 1) both; }
+.verdict { animation: pop .3s cubic-bezier(.2, .9, .3, 1.3) both; }
+.verdict.good .verdict-mark { animation: bounce .5s .1s ease both; }
+.verdict.bad .verdict-mark, .verdict.near .verdict-mark { animation: shake .4s .1s ease both; }
+.intro-check { animation: pop .4s cubic-bezier(.2, .9, .3, 1.4) both; }
+.btn, .chip, .step, .tabbar a { transition: transform .12s ease, background-color .15s; }
+.btn:active:not(:disabled), .chip:active, .step:active, .chip-block:active:not(:disabled) { transform: scale(.96); }
+.stage-bar > div, .bar > div { transition: width .35s ease; }
+.content { animation: vt-in .28s cubic-bezier(.2, .8, .2, 1) both; }
+.study, .reader { animation: vt-in .3s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes slide-in { from { opacity: 0; transform: translateX(28px); } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(8px); } }
+@keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.95); } }
+@keyframes pop { from { opacity: 0; transform: scale(.85); } }
+@keyframes bounce { 0% { transform: scale(.4); } 60% { transform: scale(1.2); } 100% { transform: scale(1); } }
+@keyframes shake { 0%, 100% { transform: none; } 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateX(24px); } }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+.study { overflow-x: clip; }

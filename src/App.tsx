@@ -8,6 +8,7 @@ import UnitScreen from './screens/Unit'
 import Study from './screens/Study'
 import Notes from './screens/Notes'
 import Stats from './screens/Stats'
+import { STAGES, type Stage } from './db'
 
 // 주소 뒤 #/... 로 화면을 구분하는 간단한 라우터 (뒤로가기 버튼이 그대로 동작)
 export const go = (path: string) => { location.hash = path }
@@ -38,11 +39,12 @@ const TABS = [
 ]
 
 export default function App() {
-  const [screen, a, b, c] = useRoute()
+  const [screen, a, b, c, d] = useRoute()
+  const isStage = (x?: string): x is Stage => STAGES.includes(x as Stage)
 
   // 읽기·학습 화면은 탭 바 없이 전체 화면
   if (screen === 'read' && a) return <Reader bookId={a} page={Number(b) || 1} />
-  if (screen === 'study' && a && b) return <Study key={`${b}/${c}`} bookId={a} cid={b} partId={c} />
+  if (screen === 'study' && a && b) return <Study key={`${b}/${c}/${d}`} bookId={a} cid={b} partId={isStage(c) ? undefined : c} stage={[c, d].find(isStage)} />
   if (screen === 'review' && a) return <Study key="review" bookId={a} />
 
   const page =
@@ -57,7 +59,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <main className="content">{page}</main>
+      <main className="content" key={screen ?? 'home'}>{page}</main>
       <nav className="tabbar">
         {TABS.map(t => (
           <a key={t.path} href={`#${t.path}`} className={active === t.path ? 'on' : ''}>
