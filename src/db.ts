@@ -61,6 +61,8 @@ export interface Sentence extends RawSentence {
   unitId: string
   bookId: string
   edited?: boolean
+  userAlts?: string[] // 사용자가 '맞게 처리'한 답 (내 판단으로 정답)
+  teacherAsk?: string[] // '선생님 확인 요청'한 답 — 나중에 Claude Code에서 검토
 }
 
 // ── Phase 3: 학습 기록 ──
@@ -108,6 +110,7 @@ class StudyDB extends Dexie {
   reviews!: Table<Review, number>
   sessions!: Table<Session, number>
   schedules!: Table<Sched, string>
+  settings!: Table<{ key: string; value: unknown }, string>
 
   constructor() {
     super('nihongo-study')
@@ -135,6 +138,8 @@ class StudyDB extends Dexie {
       })
       await tx.table('schedules').bulkPut([...map.values()])
     })
+    // Phase 5: 사용자 설정 (하루 목표, 연속 학습 기준). 백업에 포함
+    this.version(5).stores({ settings: 'key' })
   }
 }
 
@@ -149,3 +154,18 @@ export async function deleteBook(bookId: string) {
     await db.books.delete(bookId)
   })
 }
+
+// ── 사용자 설정 ──
+export interface UserSettings {
+  goalMinutes: number // 하루 학습 목표(분)
+  streakRule: 'routine' | 'minutes' // 연속 학습으로 인정하는 기준: 루틴 1회 완료 / 목표 시간 달성
+  furigana: boolean // 모든 한자에 후리가나
+}
+export const DEFAULT_SETTINGS: UserSettings = { goalMinutes: 15, streakRule: 'routine', furigana: true }
+
+export async function getSettings(): Promise<UserSettings> {
+  const rows = await db.settings.toArray()
+  return { ...DEFAULT_SETTINGS, ...Object.fromEntries(rows.map(r => [r.key, r.value])) }
+}
+export const setSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => db.settings.put({ key, value })
+

@@ -4,6 +4,7 @@ import { db } from '../db'
 import { dayKey } from '../study'
 import { addDays, recovery, type Sched } from '../srs'
 import { go } from '../App'
+import { Ja } from '../Ja'
 
 // 오답 노트 (Phase 4): 틀린 적 있는 단어·예문과 취약 문법. 회복 이력, 다시 학습 지정, 오답만 학습.
 type Filter = 'all' | 'vocab' | 'sentence' | 'grammar'
@@ -51,6 +52,7 @@ export default function Notes() {
   const recoveringN = wrong.filter(s => recovery(s) === 'recovering').length
   const dueN = sched.filter(s => s.due <= today && s.lastDate !== today).length
   const weakN = wrong.filter(s => recovery(s) === 'weak' || recovery(s) === 'recovering').length
+  const asks = [...sents.values()].filter(x => x.teacherAsk?.length)
 
   /** 사용자가 다시 학습 대상으로 지정: 오늘 복습에 나오게 */
   const relearn = (ids: string[]) =>
@@ -90,7 +92,7 @@ export default function Notes() {
           return (
             <div key={`${e.unitId}|${e.g}`} className="item-row">
               <div className="grow">
-                <div className="jp item-ja">{gm?.pattern ?? e.g}</div>
+                <div className="jp item-ja"><Ja text={gm?.pattern ?? e.g} /></div>
                 <div className="muted small">{gm?.meaning} · {u?.title}</div>
                 <div className="small"><b className="warn-text">오답 {e.wrong}회</b> <span className="muted">· 틀린 예문 {e.ids.length}개 / 연습한 예문 {e.items}개</span></div>
               </div>
@@ -122,8 +124,8 @@ export default function Notes() {
                   <span className="muted">{s.wrongCount}회 틀림</span>
                   {rec !== 'none' && <span className={`tag ${STATUS[rec][1]}`}>{STATUS[rec][0]}</span>}
                 </div>
-                {v && <div className="jp item-ja">{v.ja} <span className="muted small">{v.reading !== v.ja ? v.reading : ''} · {v.ko}</span></div>}
-                {st && <div style={{ fontWeight: 500, marginTop: 2 }}>{st.ko}<div className="jp muted small">{st.answers[0]}</div></div>}
+                {v && <div className="jp item-ja"><Ja text={v.ja} kana={v.reading} /> <span className="muted small">{v.reading !== v.ja ? v.reading : ''} · {v.ko}</span></div>}
+                {st && <div style={{ fontWeight: 500, marginTop: 2 }}>{st.ko}<div className="jp muted small"><Ja text={st.answers[0]} kana={st.kana?.[0]} /></div></div>}
                 {!v && !st && <div className="muted small">(콘텐츠에서 사라진 항목)</div>}
                 <div className="row small muted">
                   <span className="dots" aria-label={`최근 ${last5.length}회: 정답 ${last5.filter(Boolean).length}회`}>{last5.map((ok, i) => <span key={i} className={`dot ${ok ? 'ok' : 'ng'}`} />)}</span>
@@ -155,6 +157,19 @@ export default function Notes() {
         </div>
       )}
       {body}
+      {filter !== 'grammar' && filter !== 'vocab' && asks.length > 0 && (
+        <section className="card list-card">
+          <div className="list-title">선생님 확인 요청 <span className="muted small">{asks.length}개 · Claude Code에서 검토해요</span></div>
+          {asks.map(st => (
+            <div key={st.id} className="item-col">
+              <div style={{ fontWeight: 500 }}>{st.ko}</div>
+              {st.teacherAsk!.map(a => <div key={a} className="jp ans">내 답: {a}</div>)}
+              <div className="jp muted small">교재 정답: {st.answers[0]}</div>
+              <button className="link small" onClick={() => db.sentences.update(st.id, { teacherAsk: [] })}>요청 취소</button>
+            </div>
+          ))}
+        </section>
+      )}
       <button className="btn primary wide big" disabled={weakN === 0} onClick={() => go(`/review/${book.id}`)}>
         오답만 학습하기 ({weakN})
       </button>

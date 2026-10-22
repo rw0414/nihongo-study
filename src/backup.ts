@@ -2,7 +2,7 @@
 // 복구 후 원본 페이지를 보려면 라이브러리에서 같은 교재 패키지를 다시 추가하면 된다 (이미지만 채워짐).
 import { db } from './db'
 
-const TABLES = ['books', 'chapters', 'units', 'vocab', 'sentences', 'reviews', 'sessions', 'schedules'] as const
+const TABLES = ['books', 'chapters', 'units', 'vocab', 'sentences', 'reviews', 'sessions', 'schedules', 'settings'] as const
 const FORMAT = 'nihongo-study-backup'
 
 export interface BackupInfo { at: string; counts: Record<string, number> }
@@ -23,6 +23,7 @@ export async function readBackup(file: File): Promise<{ info: BackupInfo; tables
   try { data = JSON.parse(await file.text()) } catch { throw new Error('백업 파일을 읽을 수 없습니다 (JSON 형식이 아님)') }
   if (data.format !== FORMAT || data.version !== 1 || !data.tables) throw new Error('이 앱의 백업 파일이 아닙니다')
   data.tables.schedules ??= [] // Phase 4 이전 백업에는 복습 일정이 없음 (복구 후 학습하면서 다시 쌓임)
+  data.tables.settings ??= [] // Phase 5 이전 백업에는 설정이 없음 (기본값 사용)
   for (const t of TABLES) if (!Array.isArray(data.tables[t])) throw new Error(`백업 파일에 ${t} 데이터가 없습니다`)
   return { info: { at: data.at ?? '', counts: Object.fromEntries(TABLES.map(t => [t, data.tables![t].length])) }, tables: data.tables }
 }

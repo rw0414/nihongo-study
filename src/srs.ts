@@ -5,7 +5,7 @@
 // ponytail: 고정 상수 SM-2. 학습 기록이 쌓이면(Phase 5) 정답률에 맞춰 상수를 조정하거나 FSRS로 교체.
 import type { VocabGrade } from './db'
 
-export type ErrorType = '조사' | '기타' | '모름'
+export type ErrorType = '조사' | '활용' | '표기' | '누락' | '기타' | '모름'
 
 export interface Sched {
   itemId: string
@@ -66,10 +66,10 @@ export function review(prev: Sched, g: VocabGrade, today: string, error?: ErrorT
 }
 
 /** 예문 채점 결과 → 복습 등급 */
-export function sentenceGrade(r: { ok: boolean; score: number; particleHint?: boolean } | null): { grade: VocabGrade; error?: ErrorType } {
+export function sentenceGrade(r: { ok: boolean; score: number; particleHint?: boolean; errorType?: ErrorType } | null): { grade: VocabGrade; error?: ErrorType } {
   if (!r) return { grade: 'again', error: '모름' }
   if (r.ok) return { grade: 'good' }
-  return { grade: r.score >= 80 ? 'hard' : 'again', error: r.particleHint ? '조사' : '기타' }
+  return { grade: r.score >= 80 ? 'hard' : 'again', error: r.errorType ?? (r.particleHint ? '조사' : '기타') }
 }
 
 /** 오늘 복습할 것: 복습일이 지났고 오늘 아직 안 본 항목, 오래 밀린 것부터 */

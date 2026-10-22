@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db'
+import { db, getSettings } from '../db'
+import { doneDays, minutesByDay } from '../stats'
 import { dayKey, nextDay, streak } from '../study'
 import { go } from '../App'
 import InstallCard from '../InstallCard'
@@ -11,15 +12,18 @@ export default function Home() {
   const book = useLiveQuery(() => db.books.orderBy('lastOpenedAt').reverse().first().then(b => b ?? db.books.toCollection().first()).then(b => b ?? null))
   const data = useLiveQuery(async () => {
     if (!book) return null
-    const [chapters, units, sessions, sched] = await Promise.all([
+    const [chapters, units, sessions, sched, reviews, settings] = await Promise.all([
       db.chapters.where('bookId').equals(book.id).toArray(),
       db.units.where('bookId').equals(book.id).toArray(),
       db.sessions.where('unitId').startsWith(`${book.id}/`).toArray(),
       db.schedules.where('unitId').startsWith(`${book.id}/`).toArray(),
+      db.reviews.where('date').equals(dayKey()).toArray(), // 오늘 기록만 (진행 중 세션 시간 계산용)
+      getSettings(),
     ])
     const t = dayKey()
     const due = sched.filter(x => x.due <= t && x.lastDate !== t)
-    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, dueV: due.filter(x => x.itemType === 'vocab').length, dueS: due.filter(x => x.itemType === 'sentence').length }
+    const minutes = minutesByDay(sessions, reviews)
+    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings), dueV: due.filter(x => x.itemType === 'vocab').length, dueS: due.filter(x => x.itemType === 'sentence').length }
   }, [book?.id])
 
   if (book === undefined || (book && !data)) return null
@@ -37,7 +41,8 @@ export default function Home() {
   }
 
   const done = data.sessions.filter(s => s.endedAt)
-  const days = streak(done.map(s => s.date))
+  const days = streak(data.doneSet)
+  const todayMin = Math.round(data.minutes.get(dayKey()) ?? 0)
   const doneToday = done.filter(s => s.date === dayKey())
   const open = data.sessions.find(s => !s.endedAt && s.date === dayKey() && !s.key.startsWith('review#'))
   const next = open
@@ -49,7 +54,7 @@ export default function Home() {
   // 이번 주 (월~일) 학습한 날
   const week = (() => {
     const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-    const set = new Set(done.map(s => s.date))
+    const set = data.doneSet
     return ['월', '화', '수', '목', '금', '토', '일'].map((label, i) => {
       const k = dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() + i))
       return { label, done: set.has(k), today: k === dayKey() }
@@ -74,6 +79,8 @@ export default function Home() {
               <div className="sub">{book.title}</div>
               <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{next.title}{next.partTitle ? ` ${next.partTitle}` : ''}</div>
               {doneToday.length > 0 && !open && <div className="sub">오늘 {doneToday.length}회 완료했어요. 한 번 더 해도 좋아요!</div>}
+              <div className="bar" style={{ marginTop: 8 }}><div style={{ width: `${Math.min(100, (todayMin / data.goal) * 100)}%` }} /></div>
+              <div className="muted small" style={{ marginTop: 4 }}>오늘 {todayMin}분 / 목표 {data.goal}분</div>
             </div>
             {(data.dueV > 0 || data.dueS > 0) && !open && (
               <div className="blk-note">오늘 복습할 때가 된 단어 {data.dueV}개 · 예문 {data.dueS}개가 학습 중에 함께 나와요.</div>

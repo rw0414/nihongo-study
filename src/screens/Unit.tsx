@@ -5,6 +5,7 @@ import type { Block, Card } from '../content'
 import { printedPage } from '../book'
 import { usePageImage } from '../usePageImage'
 import { go } from '../App'
+import { Ja } from '../Ja'
 
 // 단원 콘텐츠 검토·수정 화면 (Phase 2). 탭: 문법 카드 / 단어 / 예문
 type Tab = 'cards' | 'vocab' | 'sentences'
@@ -20,25 +21,25 @@ const SRC = { example: '교재 예문', practice: '맛보기 연습', drill: '�
 /** 예문 속 목표 문법 부분 강조 */
 function Hl({ text, hl }: { text: string; hl?: string }) {
   const i = hl ? text.lastIndexOf(hl) : -1
-  if (i < 0) return <>{text}</>
-  return <>{text.slice(0, i)}<b className="hl">{hl}</b>{text.slice(i + hl!.length)}</>
+  if (i < 0) return <Ja text={text} />
+  return <><Ja text={text.slice(0, i)} /><b className="hl"><Ja text={hl!} /></b><Ja text={text.slice(i + hl!.length)} /></>
 }
 
 function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence> }) {
   switch (b.t) {
-    case 'p': return <p className="blk-p">{b.text}</p>
-    case 'h': return <div className="blk-h">{b.text}</div>
-    case 'note': return <div className="blk-note">{b.text}</div>
-    case 'teacher': return <div className="blk-teacher"><span className="tag ai">선생님 노트 · AI</span><div>{b.text}</div></div>
-    case 'box': return <div className="blk-box jp">{b.text}</div>
-    case 'ja': return <p className="blk-ja jp">{b.text}</p>
+    case 'p': return <p className="blk-p"><Ja text={b.text} /></p>
+    case 'h': return <div className="blk-h"><Ja text={b.text} /></div>
+    case 'note': return <div className="blk-note"><Ja text={b.text} /></div>
+    case 'teacher': return <div className="blk-teacher"><span className="tag ai">선생님 노트 · AI</span><div><Ja text={b.text} /></div></div>
+    case 'box': return <div className="blk-box jp"><Ja text={b.text} /></div>
+    case 'ja': return <p className="blk-ja jp"><Ja text={b.text} /></p>
     case 'ko': return <p className="blk-p muted">{b.text}</p>
-    case 'words': return <p className="blk-words">{b.text.split(' | ').map((w, i) => <span key={i}>{w}</span>)}</p>
+    case 'words': return <p className="blk-words">{b.text.split(' | ').map((w, i) => <span key={i}><Ja text={w} /></span>)}</p>
     case 'formula':
       return (
         <div className="blk-formula">
-          <span className="f-left">{b.left}</span><span className="muted">+</span>
-          <span className={`f-right jp ${b.crossed ? 'crossed' : ''}`}>{b.right}<small>{b.rightSub}</small></span>
+          <span className="f-left"><Ja text={b.left} /></span><span className="muted">+</span>
+          <span className={`f-right jp ${b.crossed ? 'crossed' : ''}`}><Ja text={b.right} /><small>{b.rightSub}</small></span>
         </div>
       )
     case 'ex':
@@ -47,13 +48,12 @@ function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence
           <div className="jp ja"><Hl text={b.ja} hl={b.hl} /></div>
           {b.kana && <div className="jp kana">{b.kana}</div>}
           <div className="muted">{b.ko}</div>
-          {b.ruby && <div className="muted small">{b.ruby}</div>}
         </div>
       )
     case 'table':
       return (
         <div className="blk-table"><table><tbody>
-          {b.rows.map((r, i) => <tr key={i}>{r.map((c, j) => i === 0 ? <th key={j}>{c}</th> : <td key={j} className="jp">{c}</td>)}</tr>)}
+          {b.rows.map((r, i) => <tr key={i}>{r.map((c, j) => i === 0 ? <th key={j}><Ja text={c} /></th> : <td key={j} className="jp"><Ja text={c} /></td>)}</tr>)}
         </tbody></table></div>
       )
     case 'q': {
@@ -61,8 +61,8 @@ function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence
       if (!s) return <div className="error">예문 {b.ref} 없음</div>
       return (
         <details className="blk-q">
-          <summary><span className="jp">{s.given ?? s.ko}</span> <span className="muted small">정답 보기</span></summary>
-          {s.answers.map(a => <div key={a} className="jp">{a}</div>)}
+          <summary><span className="jp"><Ja text={s.given ?? s.ko} /></span> <span className="muted small">정답 보기</span></summary>
+          {s.answers.map((a, i) => <div key={a} className="jp"><Ja text={a} kana={s.kana?.[i]} /></div>)}
           <div className="muted small">{s.ko}</div>
         </details>
       )
@@ -87,7 +87,7 @@ export function CardView({ c, sentences, offset, bookId }: { c: Card; sentences:
         {!ai && <button className="link small" onClick={() => setOrig(!orig)}>{orig ? '원본 닫기' : `원본 대조 p.${printedPage(c.page, offset)}`}</button>}
       </div>
       {orig && <OriginalPage bookId={bookId} page={c.page} />}
-      <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}>{c.title}</div>
+      <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></div>
       {c.sub && <div className="lc-sub">{c.sub}</div>}
       {c.blocks.map((b, i) => <BlockView key={i} b={b} sentences={sentences} />)}
     </section>
@@ -113,7 +113,7 @@ function VocabRow({ v }: { v: Vocab }) {
   return (
     <div className="item-row">
       <button className="grow item-main" onClick={() => setEdit(true)} aria-label={`${v.ja} 수정`}>
-        <span className="jp item-ja">{v.ja}</span>
+        <span className="jp item-ja"><Ja text={v.ja} kana={v.reading} /></span>
         {v.reading !== v.ja && <span className="jp muted"> {v.reading}</span>}
         <div className="muted">{v.ko}{v.edited && v.origin !== 'ai' && <span className="tag warn small-tag">수정함</span>}</div>
         {v.why && <div className="muted small">{v.why}</div>}
@@ -141,7 +141,7 @@ function SentenceRow({ s }: { s: Sentence }) {
         <span className="grow" /><button className="link small" onClick={() => setEdit(!edit)}>{edit ? '닫기' : '수정'}</button>
       </div>
       <div style={{ fontWeight: 500 }}>{s.ko}</div>
-      {s.given && <div className="jp muted">주어진 단어: {s.given}</div>}
+      {s.given && <div className="jp muted">주어진 단어: <Ja text={s.given} /></div>}
       {s.hint && <div className="blk-note">{s.hint}</div>}
       {edit ? (
         <>
@@ -153,8 +153,8 @@ function SentenceRow({ s }: { s: Sentence }) {
       ) : (
         <>
           {s.answerBy === 'teacher' && <span className="tag ai">선생님 작성 정답 (교재 정답 없음)</span>}
-          {s.answers.map(a => <div key={a} className="jp ans">{a}</div>)}
-          {s.alts?.map(a => <div key={a} className="jp ans alt">{a} <span className="tag ai">AI 허용 답안</span></div>)}
+          {s.answers.map((a, i) => <div key={a} className="jp ans"><Ja text={a} kana={s.kana?.[i]} /></div>)}
+          {s.alts?.map(a => <div key={a} className="jp ans alt"><Ja text={a} /> <span className="tag ai">AI 허용 답안</span></div>)}
           {s.kana?.map(a => <div key={a} className="jp ans alt">{a} <span className="tag ai">가나 입력 허용</span></div>)}
         </>
       )}
@@ -226,7 +226,7 @@ export default function UnitScreen({ bookId, cid }: { bookId: string; cid: strin
       {u.review && (
         <details className="card review-log">
           <summary>AI 선생님 검토 기록 · {u.review.at} · 수정 {u.review.fixes.length}건</summary>
-          <ul>{u.review.fixes.map((f, i) => <li key={i}>{f}</li>)}</ul>
+          <ul>{u.review.fixes.map((f, i) => <li key={i}><Ja text={f} /></li>)}</ul>
         </details>
       )}
       <div className="study-buttons">

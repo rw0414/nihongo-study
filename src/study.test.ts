@@ -75,3 +75,14 @@ describe('오늘의 학습 고르기', () => {
   it('나눈 단원은 part 순서대로', () => expect(nextDay(chapters, units, new Set(['b/c-1#all', 'b/c-2#p1']))).toMatchObject({ unitId: 'b/c-2', partId: 'p2' }))
   it('콘텐츠 없는 단원은 건너뛰고, 다 끝나면 없음', () => expect(nextDay(chapters, units, new Set(['b/c-1#all', 'b/c-2#p1', 'b/c-2#p2']))).toBeUndefined())
 })
+
+describe('유연한 로컬 채점', () => {
+  const s2 = { answers: ['主人は外国人じゃありません。'], kana: ['しゅじんはがいこくじんじゃありません。'] }
+  const R: [string, string][] = [['外国人', 'がいこくじん'], ['主人', 'しゅじん']]
+  it('한자·가나를 섞어 써도 정답', () => expect(grade('主人はがいこくじんじゃありません', s2, R)).toMatchObject({ ok: true, kanaOnly: true }))
+  it('사용자가 맞게 처리한 답도 정답', () => expect(grade('主人は外国人じゃないです', { ...s2, userAlts: ['主人は外国人じゃないです。'] }).ok).toBe(true))
+  it('끝 활용(시제)만 틀리면 활용 오류', () => expect(grade('辞書だ', { answers: ['辞書だった'] }).errorType).toBe('활용'))
+  it('다른 명사를 쓰면 기타(단어)', () => expect(grade('主人は日本人じゃありません', s2).findings[0].kind).toBe('단어'))
+  it('가나로 쓰다 틀려도 가나끼리 비교해서 정확히 짚음', () => expect(grade('しゅじんはかいこくじんじゃありません', s2, R).findings[0].kind).toBe('탁음'))
+  it('조사만 틀리면 조사', () => expect(grade('主人が外国人じゃありません', s2).errorType).toBe('조사'))
+})

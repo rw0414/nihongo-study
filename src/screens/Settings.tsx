@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { applyTheme } from '../App'
 import { makeBackup, readBackup, restoreBackup } from '../backup'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { getSettings, setSetting } from '../db'
 
 const mb = (n = 0) => `${Math.round(n / 2 ** 20)} MB`
 
@@ -38,9 +40,10 @@ export default function Settings() {
           {persisted ? '✓ 영구 저장: 브라우저가 데이터를 임의로 지우지 않습니다.' : '영구 저장 미설정 (교재를 추가하면 자동 요청)'}
         </p>
       </div>
+      <GoalCard />
       <BackupCard />
       <div className="card soon">
-        <p className="muted small">일일 목표 · 복습 · 글자 크기 · 음성 · AI 채점 설정은 해당 기능과 함께 추가됩니다.</p>
+        <p className="muted small">글자 크기 · 음성 설정은 해당 기능과 함께 추가됩니다. 채점은 폰 안에서만 해요(추가 비용 없음).</p>
       </div>
     </>
   )
@@ -109,3 +112,31 @@ function BackupCard() {
     </div>
   )
 }
+
+// 하루 목표와 연속 학습 기준
+function GoalCard() {
+  const st = useLiveQuery(getSettings)
+  if (!st) return null
+  return (
+    <div className="card col">
+      <div className="book-title">학습 목표</div>
+      <label className="row small">
+        <span className="grow">하루 목표 시간</span>
+        <select value={st.goalMinutes} onChange={e => setSetting('goalMinutes', Number(e.target.value))}>
+          {[5, 10, 15, 20, 30, 45, 60].map(m => <option key={m} value={m}>{m}분</option>)}
+        </select>
+      </label>
+      <div className="small">연속 학습으로 인정하는 기준</div>
+      <div className="seg" style={{ marginTop: 0 }}>
+        <button className={st.streakRule === 'routine' ? 'on' : ''} onClick={() => setSetting('streakRule', 'routine')}>루틴 1회 완료</button>
+        <button className={st.streakRule === 'minutes' ? 'on' : ''} onClick={() => setSetting('streakRule', 'minutes')}>목표 시간 달성</button>
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>앱을 열기만 한 날은 학습한 날로 세지 않아요.</p>
+      <label className="row small">
+        <span className="grow">모든 한자에 후리가나(읽기) 표시</span>
+        <input type="checkbox" checked={st.furigana} onChange={e => setSetting('furigana', e.target.checked)} />
+      </label>
+    </div>
+  )
+}
+

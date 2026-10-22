@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Review, type Sentence, type Session, type Step, type Vocab, type VocabGrade } from '../db'
 import { dayContent, dayKey, grade, pickSentences, pickVocab, type Grade } from '../study'
 import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type ErrorType } from '../srs'
 import { CardView, OriginalPage } from './Unit'
 import { go } from '../App'
+import { Ja } from '../Ja'
 
 // 오늘의 학습 루틴 (Phase 3·4)
 // 1단계 단어: 새 단어 → 전환 화면 → 오늘 틀린 단어 + 복습할 때가 된 단어
@@ -65,7 +66,7 @@ function VocabCard({ v, example, tag, onGrade }: { v: Vocab; example?: { ja: str
         <span className={`tag ${ai ? 'ai' : 'info'} corner`}>{ai ? 'AI 제안 단어' : '교재 단어'}</span>
         {tag && <span className="tag warn corner-r">{tag}</span>}
         {back && v.reading !== v.ja && <div className="jp reading">{v.reading}</div>}
-        <div className="jp flash-ja">{v.ja}</div>
+        <div className="jp flash-ja"><Ja text={v.ja} kana={v.reading} /></div>
         <button className="icon-btn round" aria-label="발음 듣기" onClick={() => speak(v.reading || v.ja)}>🔊</button>
         {back ? (
           <>
@@ -73,7 +74,7 @@ function VocabCard({ v, example, tag, onGrade }: { v: Vocab; example?: { ja: str
             {example && (
               <div className="flash-ex">
                 <span className="tag info">교재 예문</span>
-                <div className="jp">{example.ja}</div>
+                <div className="jp"><Ja text={example.ja} /></div>
                 <div className="muted small">{example.ko}</div>
               </div>
             )}
@@ -103,16 +104,29 @@ function DiffView({ g }: { g: Grade }) {
   return <div className="jp diff">{g.diff.map((p, i) => <span key={i} className={`d-${p.t}`}>{p.s}</span>)}</div>
 }
 
-function SentenceCard({ s, review: isReview, tag, onDone }: { s: Sentence; review: boolean; tag?: string; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
+function SentenceCard({ s, review: isReview, tag, readings, onDone }: { s: Sentence; review: boolean; tag?: string; readings: [string, string][]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
+  const [asked, setAsked] = useState(false)
   const [text, setText] = useState('')
   const [result, setResult] = useState<{ g: Grade | null; answer: string }>()
   const shown = useRef(Date.now())
   const took = useRef(0)
-  useEffect(() => { setText(''); setResult(undefined); shown.current = Date.now() }, [s.id])
+  useEffect(() => { setText(''); setResult(undefined); setAsked(false); shown.current = Date.now() }, [s.id])
 
   const submit = (giveUp = false) => {
     took.current = Date.now() - shown.current
-    setResult({ g: giveUp ? null : grade(text, s), answer: giveUp ? '' : text })
+    setResult({ g: giveUp ? null : grade(text, s, readings), answer: giveUp ? '' : text })
+  }
+  /** 내 판단으로 정답 처리: 이 답을 허용 답안으로 저장 (다시 가져와도 유지) */
+  const accept = async () => {
+    if (!result) return
+    await db.sentences.update(s.id, { userAlts: [...(s.userAlts ?? []), result.answer.trim()], edited: true })
+    onDone({ ...result.g!, ok: true, score: 100 }, result.answer, took.current)
+  }
+  /** 확실하지 않은 답은 표시해 두었다가 Claude Code에서 선생님이 검토 */
+  const ask = async () => {
+    if (!result) return
+    await db.sentences.update(s.id, { teacherAsk: [...new Set([...(s.teacherAsk ?? []), result.answer.trim()])], edited: true })
+    setAsked(true)
   }
 
   if (!result) {
@@ -122,7 +136,7 @@ function SentenceCard({ s, review: isReview, tag, onDone }: { s: Sentence; revie
           <div className="row">
             <div className="muted small grow">{isReview ? (tag ?? '복습할 문장이에요. 다시 써 보세요') : s.given ? '주어진 단어로 문장을 만들어 보세요' : '다음 문장을 일본어로 써 보세요'}</div>
           </div>
-          {s.given && <div className="jp given">{s.given}</div>}
+          {s.given && <div className="jp given"><Ja text={s.given} /></div>}
           <div className="prompt-ko">{s.ko}</div>
           {s.hint && <div className="blk-note">{s.hint}</div>}
         </div>
@@ -139,32 +153,46 @@ function SentenceCard({ s, review: isReview, tag, onDone }: { s: Sentence; revie
 
   const { g, answer } = result
   const ok = !!g?.ok
+  // 말해보카식 판정: 정답 / 아까워요(거의 맞음) / 오답. 점수 숫자는 보여 주지 않는다
+  const v = ok ? { cls: 'good', mark: '✓', title: g?.kanaOnly ? '정답! 한자로도 써 봐요' : '정답이에요!' }
+    : g && g.score >= 80 ? { cls: 'near', mark: '△', title: '아까워요!' }
+    : { cls: 'bad', mark: '✗', title: g ? '틀렸어요' : '정답을 확인해 봐요' }
+  const [first, ...rest] = g?.findings ?? []
   return (
     <>
-      <div className={`card result-head ${ok ? 'good' : 'bad'}`}>
-        <div className="score">{g ? g.score : '–'}</div>
-        <div>
-          <div className="result-title">{ok ? '정답이에요!' : g ? '아쉬워요, 거의 다 왔어요' : '정답을 확인해 봐요'}</div>
-          <div className="small">
-            {g?.kanaOnly ? '가나로 맞게 썼어요. 한자로도 써 보면 더 좋아요!' : g?.particleHint ? '조사 한 곳만 다시 볼까요?' : ok ? '완벽해요.' : '다음엔 꼭 맞힐 수 있어요.'}
-          </div>
-        </div>
+      <div className={`card verdict ${v.cls}`}>
+        <div className="verdict-mark" aria-hidden>{v.mark}</div>
+        <div className="result-title">{v.title}</div>
+        {!ok && first && <div className="verdict-why"><span className="jp">{first.text}</span></div>}
       </div>
       <div className="card col">
         {g && !ok && (
           <>
-            <div className="muted small">내 답안 (빨간 줄 = 잘못 들어간 글자, 파란 글자 = 빠진 글자)</div>
+            <div className="muted small">내 답안</div>
             <DiffView g={g} />
           </>
         )}
-        {ok && <div className="jp big-ja">{answer}</div>}
-        <div className="muted small">{s.answerBy === 'teacher' ? '정답 (선생님 작성 · 교재 정답 없음)' : `교재 정답 · p.${s.page}`}</div>
-        {s.answers.map(a => <div key={a} className="jp ans">{a}</div>)}
+        {ok && <div className="jp big-ja"><Ja text={answer} /></div>}
+        <div className="muted small">{s.answerBy === 'teacher' ? '정답 (선생님 작성 · 교재 정답 없음)' : `정답 · p.${s.page}`}</div>
+        {s.answers.map((a, i) => <div key={a} className="jp ans"><Ja text={a} kana={s.kana?.[i]} /></div>)}
         {!!s.alts?.length && <div className="muted small">이렇게 써도 정답이에요</div>}
-        {s.alts?.map(a => <div key={a} className="jp ans alt">{a}</div>)}
+        {s.alts?.map(a => <div key={a} className="jp ans alt"><Ja text={a} /></div>)}
         <div className="muted small">{s.ko}</div>
+        {g && !ok && (
+          <details className="more">
+            <summary>자세히</summary>
+            {rest.length > 0 && <ul className="findings">{rest.map((f, i) => <li key={i} className="jp">{f.text}</li>)}</ul>}
+            <div className="muted small">줄 그은 글자는 잘못 쓴 글자, 파란 글자는 들어가야 할 글자예요. 띄어쓰기와 마침표는 채점에 영향이 없어요.</div>
+          </details>
+        )}
       </div>
       <div className="grow" />
+      {!ok && g && (
+        <div className="row">
+          <button className="btn grow small-btn" onClick={accept}>내 답도 맞아요 · 정답 처리</button>
+          <button className="btn grow small-btn" disabled={asked} onClick={ask}>{asked ? '확인 요청함 ✓' : '선생님 확인 요청'}</button>
+        </div>
+      )}
       {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setText(''); shown.current = Date.now() }}>다시 입력</button>}
       <button className="btn primary wide big" onClick={() => onDone(g, answer, took.current)}>다음</button>
     </>
@@ -187,7 +215,7 @@ function Intro({ title, wrong, due, items, onGo }: { title: string; wrong: numbe
       <div className="card col">
         <div className="result-title">{wrong ? '이제 틀린 것을 복습해 봐요' : '이제 복습할 차례예요'}</div>
         <div className="muted small">{sub}</div>
-        <div className="chips">{items.slice(0, 8).map((t, i) => <span key={i} className="tag warn jp">{t}</span>)}{items.length > 8 && <span className="muted small">외 {items.length - 8}개</span>}</div>
+        <div className="chips">{items.slice(0, 8).map((t, i) => <span key={i} className="tag warn jp"><Ja text={t} /></span>)}{items.length > 8 && <span className="muted small">외 {items.length - 8}개</span>}</div>
       </div>
       <div className="grow" />
       <button className="btn primary wide big" onClick={onGo}>복습 시작 · {left}초 후 자동</button>
@@ -209,6 +237,13 @@ export default function Study({ bookId, cid, partId }: { bookId: string; cid?: s
   const [nothing, setNothing] = useState(false) // 오답만 학습인데 복습할 게 없음
   const [showOrig, setShowOrig] = useState(false)
   const busy = useRef(false) // 연타 방지: 한 항목에 답은 한 번만 (저장이 끝나면 풀림)
+
+  // 교재 단어의 한자→읽기 (긴 단어부터): 한자·가나 섞어 쓴 답 채점용
+  const readings = useMemo<[string, string][]>(() => {
+    const m = new Map<string, string>()
+    for (const v of vocabAll ?? []) if (/[一-鿿]/.test(v.ja) && v.reading && v.reading !== v.ja) m.set(v.ja, v.reading)
+    return [...m].sort((a, b) => b[0].length - a[0].length)
+  }, [vocabAll])
 
   const unit = units?.get(unitId)
   const ready = book && units && vocabAll && sentAll && (reviewOnly || unit)
@@ -389,7 +424,7 @@ export default function Study({ bookId, cid, partId }: { bookId: string; cid?: s
     const s = sentAll.find(x => x.id === st.queue[st.i])
     const isReview = st.step === 'sentence-review'
     body = !s ? <><div className="card">이 항목은 콘텐츠를 다시 가져오면서 없어졌어요.</div><button className="btn primary wide big" onClick={() => advance({}, {})}>건너뛰기</button></> : (
-      <SentenceCard s={s} review={isReview} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 써 보세요') : undefined}
+      <SentenceCard s={s} review={isReview} readings={readings} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 써 보세요') : undefined}
         onDone={once(async (g: Grade | null, answer: string, ms: number) => {
           const ok = !!g?.ok
           const sg = sentenceGrade(g)

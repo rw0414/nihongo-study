@@ -1,5 +1,7 @@
 // 학습 로직 (Phase 3). UI와 분리된 순수 함수: 하루 분량 고르기, 예문 채점, 연속 학습일.
 import type { Card, UnitContent } from './content'
+import { analyze, toErrorType, type Finding } from './feedback'
+import type { ErrorType } from './srs'
 
 // ── 하루 분량 ──
 
@@ -74,41 +76,54 @@ export function diff(answer: string, input: string): DiffPart[] {
 }
 
 const sameLen = (d: DiffPart[]) => d.filter(p => p.t === 'same').reduce((n, p) => n + [...p.s].length, 0)
-const PARTICLES = new Set([...'はがをにでとへもの'])
+
+/** 한자 단어를 읽기로 바꾼다 (긴 단어부터). 한자·가나를 섞어 쓴 답을 가나 정답과 비교할 때 사용 */
+export function toKana(s: string, readings: [string, string][]) {
+  for (const [ja, r] of readings) if (s.includes(ja)) s = s.split(ja).join(r)
+  return s
+}
 
 export interface Grade {
   ok: boolean
   score: number // 0~100
-  kanaOnly: boolean // 가나로만 맞게 씀
+  kanaOnly: boolean // 가나로만(또는 한자·가나 섞어서) 맞게 씀
   best: string // 가장 가까운 정답 (원래 표기)
   diff: DiffPart[]
-  particleHint: boolean // 틀린 곳이 조사뿐
+  particleHint: boolean // 가장 중요한 실수가 조사
+  errorType?: ErrorType // 복습 일정·오답 노트용 큰 분류
+  findings: Finding[] // 실수 유형별 설명 (최대 3개)
 }
 
-export function grade(input: string, s: { answers: string[]; alts?: string[]; kana?: string[] }): Grade {
+/** 로컬 채점. readings(교재 단어의 한자→읽기)를 주면 한자·가나를 섞어 쓴 답도 정답으로 본다 */
+export function grade(
+  input: string,
+  s: { answers: string[]; alts?: string[]; kana?: string[]; userAlts?: string[] },
+  readings: [string, string][] = [],
+): Grade {
   const n = normalize(input)
-  const written = [...s.answers, ...(s.alts ?? [])]
+  const written = [...s.answers, ...(s.alts ?? []), ...(s.userAlts ?? [])]
+  const ok = (best: string, kanaOnly: boolean): Grade => ({ ok: true, score: 100, kanaOnly, best, diff: [{ t: 'same', s: n }], particleHint: false, findings: [] })
   const exact = written.find(a => normalize(a) === n)
-  if (exact) return { ok: true, score: 100, kanaOnly: false, best: exact, diff: [{ t: 'same', s: n }], particleHint: false }
-  const kanaIdx = (s.kana ?? []).findIndex(k => normalize(k) === n)
-  if (kanaIdx >= 0) return { ok: true, score: 100, kanaOnly: true, best: written[kanaIdx] ?? written[0], diff: [{ t: 'same', s: n }], particleHint: false }
+  if (exact) return ok(exact, false)
+  const kanaN = normalize(toKana(input, readings))
+  const kanaIdx = (s.kana ?? []).findIndex(k => normalize(k) === n || normalize(k) === kanaN)
+  if (kanaIdx >= 0) return ok(written[kanaIdx] ?? written[0], true)
 
-  // 가장 비슷한 정답과 비교 (한자 표기·가나 표기 모두 후보)
-  const cands = [...written.map((w, i) => ({ show: w, norm: normalize(w), i })), ...(s.kana ?? []).map((k, i) => ({ show: written[i] ?? written[0], norm: normalize(k), i }))]
-  let best = cands[0], bestD = diff(best.norm, n), bestSim = -1
+  // 가장 비슷한 정답과 비교: 한자 표기 정답 ↔ 내 답 그대로, 가나 정답 ↔ 내 답을 가나로 바꾼 것
+  const cands = [
+    ...written.map(w => ({ show: w, norm: normalize(w), inp: n })),
+    ...(s.kana ?? []).map((k, i) => ({ show: written[i] ?? written[0], norm: normalize(k), inp: kanaN })),
+  ]
+  let best = cands[0], bestD = diff(best.norm, best.inp), bestSim = -1
   for (const c of cands) {
-    const d = diff(c.norm, n)
-    const sim = (2 * sameLen(d)) / ([...c.norm].length + [...n].length || 1)
+    const d = diff(c.norm, c.inp)
+    const sim = (2 * sameLen(d)) / ([...c.norm].length + [...c.inp].length || 1)
     if (sim > bestSim) { best = c; bestD = d; bestSim = sim }
   }
-  const changed = bestD.filter(p => p.t !== 'same').flatMap(p => [...p.s])
+  const findings = analyze(best.norm, best.inp, bestD)
   return {
-    ok: false,
-    score: Math.round(bestSim * 100),
-    kanaOnly: false,
-    best: best.show,
-    diff: bestD,
-    particleHint: changed.length > 0 && changed.length <= 2 && changed.every(ch => PARTICLES.has(ch)),
+    ok: false, score: Math.round(bestSim * 100), kanaOnly: false, best: best.show, diff: bestD,
+    particleHint: findings[0]?.kind === '조사', errorType: toErrorType(findings), findings,
   }
 }
 
