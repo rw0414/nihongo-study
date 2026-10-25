@@ -23,6 +23,10 @@ export interface Sched {
   streak: number // 최근 연속 정답
   errors: Partial<Record<ErrorType, number>> // 예문 오답 원인
   related?: boolean // 같은 문법을 자주 틀려서 추가된 예문
+  // 단어(안키식 시간 일정): 다시 나오는 시각, 남은 학습 단계 수(0 = 졸업), 학습 단계 개수(2 = 새 단어, 1 = 다시 학습)
+  dueAt?: number
+  left?: number
+  steps?: number
 }
 
 export const addDays = (day: string, n: number) => {
@@ -100,33 +104,60 @@ export function relatedPicks(
   return same.filter(s => !sched.has(s.id)).slice(0, n).map(s => s.id)
 }
 
-// ── 단어: 안키(Anki) 기본 설정과 같은 주기, 버튼은 '모름(Again)'·'알고 있음(Good)' 두 개 ──
-//  새 단어: 학습 단계 1분·10분 → 두 번 연속 알고 있음이면 졸업, 1일 뒤
-//  복습 단어: 알고 있음 → 간격 × ease(기본 2.5), 최소 +1일 / 모름 → ease −0.2(최소 1.3), 다시 학습 1단계(10분) 후 1일 뒤
-//  학습 단계(분 단위)는 같은 학습 안에서 대기열 뒤로 다시 보내는 것으로 대신한다.
+// ── 단어: 안키(Anki) 기본 설정과 똑같이 '시간'으로 다시 나온다. 버튼은 모름(Again)·알고 있음(Good) ──
+//  새 단어: 학습 단계 1분 → 10분 → 졸업(1일 뒤). 모름이면 1분 단계부터 다시
+//  복습 단어: 알고 있음 → 간격 × ease(기본 2.5), 최소 +1일 / 모름 → ease −0.2(최소 1.3), 10분 뒤 다시 학습 → 1일 뒤
+//  지금 나올 단어가 없으면 20분 안에 나올 학습 중 단어를 미리 보여 준다 (안키 '미리 학습' 한도 20분)
+export const MIN = 60000
+export const LEARN_STEPS = [1, 10] // 분
+export const RELEARN_STEPS = [10]
+export const LEARN_AHEAD = 20 * MIN
 
-/** 학습 안에서 아직 졸업하지 않은 단어. left = 남은 '알고 있음' 횟수, practice = 오늘 이미 일정을 반영한 연습 */
-export interface Learn { steps: number; left: number; wrong: boolean; practice?: boolean }
+/** 그날 0시 (복습 단어는 그날이 되면 나온다) */
+export const dayStart = (day: string) => new Date(day + 'T00:00:00').getTime()
+const today = (now: number) => new Date(now).toLocaleDateString('sv')
 
-const finish = (s: Sched, ok: boolean, today: string): Sched => ({
-  ...s, wrongCount: s.wrongCount + (ok ? 0 : 1), correctCount: s.correctCount + (ok ? 1 : 0), streak: ok ? s.streak + 1 : 0,
-  lastGrade: ok ? 'good' : 'again', lastDate: today, due: addDays(today, s.interval),
-})
+/** 지금 단어 상태: 새 단어 / 학습 중(분 단위) / 복습(일 단위) */
+export function vocabState(s: Sched | undefined): 'new' | 'learning' | 'review' {
+  if (!s || (!s.lastDate && !s.reps && s.left === undefined)) return 'new'
+  if (s.left) return 'learning'
+  return s.reps > 0 ? 'review' : 'learning'
+}
+/** 다시 나오는 시각 (옛 기록은 복습일 0시) */
+export const dueAt = (s: Sched) => s.dueAt ?? dayStart(s.due)
 
-/** 단어 답 하나. learn이 남으면 같은 학습에서 다시 낸다 */
-export function vocabAnswer(prev: Sched, learn: Learn | undefined, know: boolean, today: string): { sched: Sched; learn?: Learn } {
-  if (!learn) {
-    if (prev.lastDate === today) learn = { steps: 1, left: 1, wrong: false, practice: true } // 오늘 이미 끝낸 단어(오답만 학습 등)
-    else if (prev.reps > 0) {
-      if (know) return { sched: finish({ ...prev, reps: prev.reps + 1, interval: Math.max(prev.interval + 1, Math.round(prev.interval * prev.ease)) }, true, today) }
-      // 잊음: 다시 학습. 중간에 그만둬도 내일 다시 나오도록 일정부터 바꿔 둔다
-      const s = { ...prev, lapses: prev.lapses + 1, reps: 0, interval: 1, ease: Math.max(1.3, prev.ease - 0.2), due: addDays(today, 1) }
-      return { sched: s, learn: { steps: 1, left: 1, wrong: true } }
-    } else learn = { steps: 2, left: 2, wrong: false } // 새 단어
+/** 단어 답 하나 → 다음 일정 */
+export function ankiAnswer(prev: Sched, know: boolean, now: number): Sched {
+  const t = today(now)
+  const first = prev.lastDate !== t // 오답 노트 통계는 그날 첫 답으로
+  const s: Sched = {
+    ...prev, lastGrade: know ? 'good' : 'again', lastDate: t,
+    wrongCount: prev.wrongCount + (first && !know ? 1 : 0), correctCount: prev.correctCount + (first && know ? 1 : 0),
+    streak: first ? (know ? prev.streak + 1 : 0) : prev.streak,
   }
-  if (!know) return { sched: prev, learn: { ...learn, left: learn.steps, wrong: true } }
-  const left = learn.left - 1
-  if (left > 0) return { sched: prev, learn: { ...learn, left } }
-  if (learn.practice) return { sched: prev }
-  return { sched: finish({ ...prev, reps: 1, interval: 1 }, !learn.wrong, today) } // 졸업
+  const at = (ms: number) => { s.dueAt = now + ms; s.due = today(s.dueAt) }
+  const graduate = (days: number) => { s.left = 0; s.interval = days; s.due = addDays(t, days); s.dueAt = dayStart(s.due) }
+  const state = vocabState(prev)
+  if (state === 'review') {
+    if (know) { s.reps = prev.reps + 1; graduate(Math.max(prev.interval + 1, Math.round(prev.interval * prev.ease))) }
+    else { s.lapses = prev.lapses + 1; s.ease = Math.max(1.3, prev.ease - 0.2); s.reps = 0; s.interval = 1; s.steps = RELEARN_STEPS.length; s.left = RELEARN_STEPS.length; at(RELEARN_STEPS[0] * MIN) }
+    return s
+  }
+  // 새 단어·학습 중
+  const steps = state === 'new' ? LEARN_STEPS : prev.steps === RELEARN_STEPS.length ? RELEARN_STEPS : LEARN_STEPS
+  s.steps = steps.length
+  const left = state === 'new' ? steps.length : prev.left || 1
+  if (!know) { s.left = steps.length; at(steps[0] * MIN); return s }
+  if (left - 1 > 0) { s.left = left - 1; at(steps[steps.length - s.left] * MIN); return s }
+  s.reps = Math.max(prev.reps, 0) + 1
+  graduate(1)
+  return s
+}
+
+/** 지금 복습할 단어: 때가 된 것(오래된 것부터). 없으면 20분 안에 나올 학습 중 단어 */
+export function dueVocab(all: Sched[], now: number, limit = 200): string[] {
+  const vocab = all.filter(s => s.itemType === 'vocab' && vocabState(s) !== 'new')
+  const due = vocab.filter(s => dueAt(s) <= now)
+  const pool = due.length ? due : vocab.filter(s => vocabState(s) === 'learning' && dueAt(s) <= now + LEARN_AHEAD)
+  return pool.sort((a, b) => dueAt(a) - dueAt(b)).slice(0, limit).map(s => s.itemId)
 }

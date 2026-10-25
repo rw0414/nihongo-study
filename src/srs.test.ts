@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type Sched , vocabAnswer } from './srs'
+import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type Sched , ankiAnswer, dueVocab, MIN } from './srs'
 
 const T = '2026-10-21'
 const s0 = newSched('v1', 'vocab', 'b/c-1', T)
@@ -65,36 +65,37 @@ describe('예문 오답 집계', () => {
   })
 })
 
-describe('단어 안키 주기', () => {
-  const t = '2026-10-22'
-  const fresh = newSched('v1', 'vocab', 'u', t)
-  it('새 단어는 알고 있음 두 번에 졸업, 1일 뒤', () => {
-    const a = vocabAnswer(fresh, undefined, true, t)
-    expect(a.learn).toMatchObject({ left: 1 })
-    const b = vocabAnswer(a.sched, a.learn, true, t)
-    expect(b.learn).toBeUndefined()
-    expect(b.sched).toMatchObject({ reps: 1, interval: 1, due: '2026-10-23', wrongCount: 0 })
+describe('단어 안키 주기 (시간)', () => {
+  const now = new Date('2026-10-22T09:00:00').getTime()
+  const fresh = newSched('v1', 'vocab', 'u', '2026-10-22')
+  it('새 단어: 알고 있음 → 10분 뒤, 한 번 더 알고 있음 → 졸업 1일 뒤', () => {
+    const a = ankiAnswer(fresh, true, now)
+    expect(a).toMatchObject({ left: 1, dueAt: now + 10 * MIN })
+    const b = ankiAnswer(a, true, now + 10 * MIN)
+    expect(b).toMatchObject({ left: 0, reps: 1, interval: 1, due: '2026-10-23', wrongCount: 0 })
   })
-  it('모름이면 학습 단계 처음부터, 졸업해도 오답으로 셈', () => {
-    const a = vocabAnswer(fresh, undefined, true, t)
-    const b = vocabAnswer(a.sched, a.learn, false, t)
-    expect(b.learn).toMatchObject({ left: 2, wrong: true })
-    const c = vocabAnswer(b.sched, b.learn, true, t), d = vocabAnswer(c.sched, c.learn, true, t)
-    expect(d.sched).toMatchObject({ wrongCount: 1, interval: 1 })
+  it('새 단어: 모름 → 1분 뒤 처음 단계부터', () => {
+    const a = ankiAnswer(fresh, false, now)
+    expect(a).toMatchObject({ left: 2, dueAt: now + MIN, wrongCount: 1 })
+    const b = ankiAnswer(a, true, now + MIN)
+    expect(b).toMatchObject({ left: 1, dueAt: now + MIN + 10 * MIN })
   })
-  it('복습: 알고 있음은 간격 × 2.5', () => {
-    const r = vocabAnswer({ ...fresh, reps: 2, interval: 4, lastDate: '2026-10-18' }, undefined, true, t)
-    expect(r.sched).toMatchObject({ interval: 10, due: '2026-11-01', reps: 3 })
+  it('복습: 알고 있음 → 간격 × 2.5', () => {
+    const r = ankiAnswer({ ...fresh, reps: 2, interval: 4, left: 0, lastDate: '2026-10-18', due: '2026-10-22' }, true, now)
+    expect(r).toMatchObject({ interval: 10, due: '2026-11-01', reps: 3 })
   })
-  it('복습: 모름은 ease −0.2, 한 번 다시 학습 후 1일 뒤', () => {
-    const a = vocabAnswer({ ...fresh, reps: 3, interval: 10, lastDate: '2026-10-12' }, undefined, false, t)
-    expect(a.sched).toMatchObject({ ease: 2.3, lapses: 1, reps: 0, due: '2026-10-23' })
-    const b = vocabAnswer(a.sched, a.learn, true, t)
-    expect(b.learn).toBeUndefined()
-    expect(b.sched).toMatchObject({ interval: 1, due: '2026-10-23', wrongCount: 1, streak: 0 })
+  it('복습: 모름 → ease −0.2, 10분 뒤 다시 학습 → 1일 뒤', () => {
+    const a = ankiAnswer({ ...fresh, reps: 3, interval: 10, left: 0, lastDate: '2026-10-12', due: '2026-10-22' }, false, now)
+    expect(a).toMatchObject({ ease: 2.3, lapses: 1, left: 1, dueAt: now + 10 * MIN })
+    const b = ankiAnswer(a, true, now + 10 * MIN)
+    expect(b).toMatchObject({ left: 0, interval: 1, due: '2026-10-23' })
   })
-  it('오늘 이미 끝낸 단어는 일정을 바꾸지 않음', () => {
-    const done = { ...fresh, reps: 1, interval: 1, lastDate: t, due: '2026-10-23' }
-    expect(vocabAnswer(done, undefined, true, t)).toEqual({ sched: done })
+  it('지금 나올 단어 → 없으면 20분 안의 학습 단어 미리', () => {
+    const learning = { ...fresh, itemId: 'a', left: 1, lastDate: '2026-10-22', dueAt: now + 10 * MIN }
+    const later = { ...fresh, itemId: 'b', reps: 1, left: 0, lastDate: '2026-10-22', due: '2026-10-23' }
+    expect(dueVocab([learning, later], now)).toEqual(['a'])
+    const due = { ...fresh, itemId: 'c', reps: 1, left: 0, lastDate: '2026-10-20', due: '2026-10-22' }
+    expect(dueVocab([learning, later, due], now)).toEqual(['c'])
+    expect(dueVocab([{ ...learning, dueAt: now + 30 * MIN }], now)).toEqual([])
   })
 })

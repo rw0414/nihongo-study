@@ -18,13 +18,6 @@ const ORIGIN = {
 
 const SRC = { example: '교재 예문', practice: '맛보기 연습', drill: '실력 다지기' }
 
-/** 예문 속 목표 문법 부분 강조 */
-function Hl({ text, hl }: { text: string; hl?: string }) {
-  const i = hl ? text.lastIndexOf(hl) : -1
-  if (i < 0) return <Ja text={text} />
-  return <><Ja text={text.slice(0, i)} /><b className="hl"><Ja text={hl!} /></b><Ja text={text.slice(i + hl!.length)} /></>
-}
-
 function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence> }): JSX.Element | null {
   switch (b.t) {
     case 'p': return <p className="blk-p"><Ja text={b.text} /></p>
@@ -45,7 +38,7 @@ function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence
     case 'ex':
       return (
         <div className="blk-ex">
-          <div className="jp ja"><Hl text={b.ja} hl={b.hl} /></div>
+          <div className="jp ja"><Ja text={b.ja} kana={b.kana} hl={b.hl} /></div>
           {b.kana && <div className="jp kana">{b.kana}</div>}
           <div className="muted">{b.ko}</div>
         </div>

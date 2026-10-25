@@ -1,29 +1,73 @@
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, getSettings, STAGES, type Stage } from '../db'
+import { db, getSettings, STAGES, type Chapter, type Session, type Stage } from '../db'
 import { doneDays, minutesByDay } from '../stats'
-import { dayKey, nextDay, streak } from '../study'
+import { dayKey, stagePercent, stars, streak } from '../study'
+import { leafChapters } from '../book'
 import { go } from '../App'
 import InstallCard from '../InstallCard'
 
+// 홈 = 게임 같은 로드맵. 하루 분량(단원 또는 그 part) 하나가 스테이지 하나.
+// 지난 스테이지는 다시, 앞 스테이지도 미리 할 수 있다. 변환 전 단원은 잠김(준비 중).
+
 const today = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })
+const LABEL: Record<Stage, string> = { vocab: '단어 암기', grammar: '문법 카드', sentence: '예문 작성' }
+const ICON: Record<Stage, string> = { vocab: '🃏', grammar: '📖', sentence: '✏️' }
+const ZIG = [0, 56, 84, 56, 0, -56, -84, -56] // 지그재그 길
+
+interface Node {
+  key: string // `${unitId}#${partId ?? 'all'}`
+  unitId: string
+  partId?: string
+  title: string
+  partTitle?: string
+  section: string
+  locked: boolean
+  done: boolean
+  stars: number
+  open?: Session
+}
+
+/** 단계별 진행률 (진행 중 세션 기준, 끝난 스테이지는 100) */
+function percents(n: Node): Record<Stage, number> {
+  const st = n.open?.state
+  const cur = st?.stage ?? (st ? (st.step.startsWith('vocab') ? 'vocab' : st.step === 'grammar' ? 'grammar' : 'sentence') : undefined)
+  return Object.fromEntries(STAGES.map(x => {
+    if (!st) return [x, n.done ? 100 : 0]
+    const c = x === cur ? st : st.pos?.[x] ?? (!st.pos && STAGES.indexOf(x) < STAGES.indexOf(cur!) ? { step: 'done', queue: [], i: 0 } : undefined)
+    return [x, stagePercent(x, c)]
+  })) as Record<Stage, number>
+}
+
+function Gauge({ stage, pct, onClick, now }: { stage: Stage; pct: number; onClick: () => void; now?: boolean }) {
+  return (
+    <button className={`gauge ${now ? 'now' : ''} ${pct >= 100 ? 'full' : ''}`} onClick={onClick}>
+      <span className="g-icon" aria-hidden>{pct >= 100 ? '✓' : ICON[stage]}</span>
+      <span className="g-body">
+        <span className="g-top"><b>{LABEL[stage]}</b><span className="small">{pct}%</span></span>
+        <span className="g-bar"><span style={{ width: `${pct}%` }} /></span>
+      </span>
+    </button>
+  )
+}
 
 export default function Home() {
   const book = useLiveQuery(() => db.books.orderBy('lastOpenedAt').reverse().first().then(b => b ?? db.books.toCollection().first()).then(b => b ?? null))
   const data = useLiveQuery(async () => {
     if (!book) return null
-    const [chapters, units, sessions, sched, reviews, settings] = await Promise.all([
-      db.chapters.where('bookId').equals(book.id).toArray(),
+    const [chapters, units, sessions, reviews, settings] = await Promise.all([
+      db.chapters.where('[bookId+order]').between([book.id, 0], [book.id, Infinity]).toArray(),
       db.units.where('bookId').equals(book.id).toArray(),
       db.sessions.where('unitId').startsWith(`${book.id}/`).toArray(),
-      db.schedules.where('unitId').startsWith(`${book.id}/`).toArray(),
-      db.reviews.where('date').equals(dayKey()).toArray(), // 오늘 기록만 (진행 중 세션 시간 계산용)
+      db.reviews.where('date').equals(dayKey()).toArray(),
       getSettings(),
     ])
-    const t = dayKey()
-    const due = sched.filter(x => x.due <= t && x.lastDate !== t)
     const minutes = minutesByDay(sessions, reviews)
-    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings), dueV: due.filter(x => x.itemType === 'vocab').length, dueS: due.filter(x => x.itemType === 'sentence').length }
+    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings) }
   }, [book?.id])
+  const [sel, setSel] = useState<string>()
+  const curRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { curRef.current?.scrollIntoView({ block: 'center' }) }, [data === undefined]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (book === undefined || (book && !data)) return null
   if (!book || !data) {
@@ -39,34 +83,35 @@ export default function Home() {
     )
   }
 
-  const done = data.sessions.filter(s => s.endedAt)
-  const days = streak(data.doneSet)
-  const todayMin = Math.round(data.minutes.get(dayKey()) ?? 0)
-  const doneToday = done.filter(s => s.date === dayKey())
-  const open = data.sessions.find(s => !s.endedAt && s.date === dayKey() && !s.key.startsWith('review#'))
-  const next = open
-    ? { unitId: open.unitId, partId: open.partId, title: data.chapters.find(c => c.id === open.unitId)?.title ?? '', partTitle: data.units.get(open.unitId)?.data.parts?.find(p => p.id === open.partId)?.title }
-    : nextDay(data.chapters, data.units, new Set(done.map(s => s.key)))
-  // 단계별 진행: 옛 기록(pos 없음)은 지금 단계 앞을 끝난 것으로
-  const cur = open?.state.stage ?? (open ? (open.state.step.startsWith('vocab') ? 'vocab' : open.state.step === 'grammar' ? 'grammar' : 'sentence') : undefined)
-  const prog = (x: Stage) => {
-    if (!open) return { done: false, text: '' }
-    const c = x === cur ? open.state : open.state.pos?.[x]
-    if (!c) return { done: !open.state.pos && STAGES.indexOf(x) < STAGES.indexOf(cur!), text: '' }
-    return { done: c.step === 'done', text: c.step === 'done' ? '' : c.queue.length ? `${Math.min(c.i + 1, c.queue.length)}/${c.queue.length}` : '' }
-  }
-  const start = (s?: Stage) => next && go(`/study/${book.id}/${next.unitId.slice(book.id.length + 1)}${next.partId ? `/${next.partId}` : ''}${s ? `/${s}` : ''}`)
-
-  // 이번 주 (월~일) 학습한 날
-  const week = (() => {
-    const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-    const set = data.doneSet
-    return ['월', '화', '수', '목', '금', '토', '일'].map((label, i) => {
-      const k = dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() + i))
-      return { label, done: set.has(k), today: k === dayKey() }
+  // 스테이지 목록
+  const byId = new Map(data.chapters.map(c => [c.id, c]))
+  const top = (c: Chapter): Chapter => (c.parentId && byId.get(c.parentId) ? top(byId.get(c.parentId)!) : c)
+  const t = dayKey()
+  // 아직 변환 안 된 단원은 '준비 중'으로 보여 주되, 번호가 붙은 과(01, 34 …)만 (부록 제외)
+  const nodes: Node[] = leafChapters(data.chapters).filter(c => data.units.has(c.id) || (/^\d+/.test(c.title) && !top(c).title.includes('부록'))).flatMap(c => {
+    const u = data.units.get(c.id)
+    const parts = u?.data.parts ?? [undefined]
+    return parts.map(p => {
+      const key = `${c.id}#${p?.id ?? 'all'}`
+      const ended = data.sessions.filter(s => s.key === key && s.endedAt)
+      const best = Math.max(0, ...ended.map(s => stars(s.stats)))
+      return {
+        key, unitId: c.id, partId: p?.id, title: c.title, partTitle: p?.title, section: top(c).title, locked: !u,
+        done: ended.length > 0, stars: best, open: data.sessions.find(s => s.key === key && !s.endedAt && s.date === t),
+      }
     })
-  })()
+  })
+  const openNode = nodes.find(n => n.open)
+  const current = openNode ?? nodes.find(n => !n.done && !n.locked)
+  const selected = nodes.find(n => n.key === sel)
+  const start = (n: Node, s?: Stage) => go(`/study/${book.id}/${n.unitId.slice(book.id.length + 1)}${n.partId ? `/${n.partId}` : ''}${s ? `/${s}` : ''}`)
 
+  const days = streak(data.doneSet)
+  const todayMin = Math.round(data.minutes.get(t) ?? 0)
+  const clear = nodes.filter(n => n.done).length, total = nodes.filter(n => !n.locked).length
+
+  let lastSection = ''
+  let k = 0
   return (
     <>
       <div className="row" style={{ alignItems: 'flex-end' }}>
@@ -74,54 +119,70 @@ export default function Home() {
           <div className="sub">{today}</div>
           <h1>오늘의 학습</h1>
         </div>
-        <span className="streak">🔥 {days}일 연속</span>
+        <span className="streak">🔥 {days}일</span>
       </div>
-
       <InstallCard />
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {next ? (
-          <>
-            <div>
-              <div className="sub">{book.title}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{next.title}{next.partTitle ? ` ${next.partTitle}` : ''}</div>
-              {doneToday.length > 0 && !open && <div className="sub">오늘 {doneToday.length}회 완료했어요. 한 번 더 해도 좋아요!</div>}
-              <div className="bar" style={{ marginTop: 8 }}><div style={{ width: `${Math.min(100, (todayMin / data.goal) * 100)}%` }} /></div>
-              <div className="muted small" style={{ marginTop: 4 }}>오늘 {todayMin}분 / 목표 {data.goal}분</div>
-            </div>
-            {(data.dueV > 0 || data.dueS > 0) && !open && (
-              <div className="blk-note">오늘 복습할 때가 된 단어 {data.dueV}개 · 예문 {data.dueS}개가 학습 중에 함께 나와요.</div>
-            )}
-            <div className="steps">
-              {STAGES.map((s, i) => {
-                const p = prog(s)
-                return (
-                  <button className={`step ${s === cur ? 'now' : ''}`} key={s} onClick={() => start(s)}>
-                    <div className={`num ${p.done ? 'done' : ''}`}>{p.done ? '✓' : i + 1}</div>
-                    <div className="grow" style={{ fontWeight: 500 }}>{({ vocab: '단어 암기', grammar: '문법 카드', sentence: '예문 작성' } as const)[s]}</div>
-                    <span className={`small ${s === cur ? 'accent-text' : 'muted'}`}>{p.done ? '완료' : p.text ? <b>{p.text}</b> : '›'}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <button className="btn primary wide big" onClick={() => start()}>{open ? '이어서 학습하기' : doneToday.length ? '다음 학습 시작' : '오늘의 학습 시작'}</button>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>변환된 단원을 모두 마쳤어요! 🎉</div>
-            <div className="sub">다음 단원 콘텐츠가 준비되면 이어서 학습할 수 있어요.</div>
-          </>
-        )}
-      </div>
 
-      <div className="card">
-        <div className="sub" style={{ marginBottom: 10 }}>이번 주</div>
-        <div className="week">
-          {week.map(d => (
-            <div key={d.label}><div className={d.today ? 'today' : ''}>{d.label}</div><div className={`dot ${d.done ? 'on' : ''} ${d.today ? 'ring' : ''}`} /></div>
-          ))}
+      {/* 오늘 할 스테이지 */}
+      {current ? (
+        <div className="card now-card">
+          <div className="row">
+            <span className="tag info">스테이지 {nodes.indexOf(current) + 1}</span>
+            <span className="grow" />
+            <span className="muted small">오늘 {todayMin}분 / {data.goal}분</span>
+          </div>
+          <div className="now-title">{current.title}{current.partTitle ? ` ${current.partTitle}` : ''}</div>
+          {STAGES.map(s => <Gauge key={s} stage={s} pct={percents(current)[s]} onClick={() => start(current, s)} />)}
+          <button className="btn primary wide big start-btn" onClick={() => start(current)}>{current.open ? '이어서 하기' : '▶ 시작하기'}</button>
+          <div className="muted small center">세 칸을 모두 채우면 스테이지 클리어! 원하는 칸부터 눌러도 돼요</div>
         </div>
-      </div>
+      ) : (
+        <div className="card"><b>준비된 스테이지를 모두 깼어요! 🎉</b><div className="sub">다음 단원이 준비되면 길이 이어져요.</div></div>
+      )}
 
+      {/* 로드맵 */}
+      <div className="legend small muted"><span><i className="dot done" />클리어</span><span><i className="dot now" />지금</span><span><i className="dot" />앞으로</span><span>🔒 준비 중</span></div>
+      <div className="road">
+        {nodes.map(n => {
+          const head = n.section !== lastSection ? (lastSection = n.section) : null
+          const x = ZIG[k++ % ZIG.length]
+          const isNow = n === current
+          return (
+            <div key={n.key}>
+              {head && <div className="road-section">{head}</div>}
+              <div className={`road-node ${isNow ? "has-start" : ""}`} style={{ transform: `translateX(${x}px)` }} ref={isNow ? curRef : undefined}>
+                {isNow && <div className="start-bubble">START</div>}
+                <button className={`stage ${n.done ? 'done' : ''} ${isNow ? 'now' : ''} ${n.locked ? 'locked' : ''}`} disabled={n.locked}
+                  aria-label={`${n.title}${n.partTitle ?? ''}${n.done ? ' 클리어' : ''}`} onClick={() => setSel(n.key)}>
+                  {n.locked ? '🔒' : n.done ? '✓' : nodes.indexOf(n) + 1}
+                </button>
+                {n.done && <div className="stars">{'★'.repeat(n.stars)}<span className="off">{'★'.repeat(3 - n.stars)}</span></div>}
+                <div className="road-label">{n.title.replace(/^\d+\s*/, '')}{n.partTitle ? ` ${n.partTitle}` : ''}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="muted small center">스테이지 {clear} / {total} 클리어</div>
+
+      {/* 스테이지 시트 */}
+      {selected && (
+        <div className="sheet-back" onClick={() => setSel(undefined)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div className="row">
+              <span className="tag info">스테이지 {nodes.indexOf(selected) + 1}</span>
+              {selected.done && <span className="stars">{'★'.repeat(selected.stars)}<span className="off">{'★'.repeat(3 - selected.stars)}</span></span>}
+              <span className="grow" />
+              <button className="icon-btn" aria-label="닫기" onClick={() => setSel(undefined)}>✕</button>
+            </div>
+            <div className="now-title">{selected.title}{selected.partTitle ? ` ${selected.partTitle}` : ''}</div>
+            <div className="muted small">{selected.done ? '클리어한 스테이지예요. 다시 하면 복습이 돼요.' : selected === current ? '오늘 할 스테이지예요.' : '앞 스테이지를 미리 해도 괜찮아요.'}</div>
+            {STAGES.map(s => <Gauge key={s} stage={s} pct={percents(selected)[s]} onClick={() => start(selected, s)} />)}
+            <button className="btn primary wide big" onClick={() => start(selected)}>{selected.open ? '이어서 하기' : selected.done ? '다시 하기' : '▶ 시작하기'}</button>
+          </div>
+        </div>
+      )}
     </>
   )
 }

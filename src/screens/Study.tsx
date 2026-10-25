@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, STAGES, type Cursor, type Review, type Sentence, type Session, type Stage, type Step, type Vocab, type VocabGrade } from '../db'
-import { chunks, dayContent, dayKey, grade, pickSentences, pickVocab, shuffle, type Grade } from '../study'
-import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, vocabAnswer, type ErrorType } from '../srs'
+import { chunks, dayContent, dayKey, grade, orderSentences, pickSentences, pickVocab, shuffle, traps, type Grade } from '../study'
+import { addDays, ankiAnswer, dueToday, dueVocab, newSched, recovery, relatedPicks, review, sentenceGrade, vocabState, type ErrorType } from '../srs'
 import { CardView } from './Unit'
 import { go } from '../App'
 import { Ja } from '../Ja'
 import { hanjaOf } from '../hanja'
+import { toRomaji } from '../romaji'
+import Keyboard, { ImeDisplay } from '../Keyboard'
+import { flush, type ImeState } from '../ime'
 
 // 오늘의 학습 루틴. 세 단계는 홈에서 골라 어느 것부터 해도 되고, 단계마다 진행 위치를 따로 기억한다.
-// 1단계 단어: 새 단어 → 전환 화면 → 다시 확인할 단어(안키 학습 단계) + 복습할 때가 된 단어
+// 1단계 단어: 새 단어(처음 보는 단어만) → 전환 화면 → 복습. 복습은 안키처럼 시간이 된 단어만 나온다 (1분·10분 학습 단계, 며칠 뒤 복습)
 // 2단계 문법 카드 (맛보기 연습·실력 다지기 문제는 3단계로 옮김)
 // 3단계 예문: 새 예문(맛보기 연습은 블록 배열) → 전환 화면 → 오늘 틀린 예문 + 복습할 때가 된 예문
 // 오답만 학습(cid 없음): 아직 회복하지 못한 오답 단어 → 오답 예문
@@ -156,22 +159,104 @@ function VocabCard({ v, example, tag, onAnswer }: { v: Vocab; example?: { ja: st
   )
 }
 
+// ── 준비마당 가나: 보이는 글자를 일본어 키보드로 직접 입력 (스와이프 대신) ──
+const toHira = (s: string) => s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
+function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (know: boolean, ms: number) => void }) {
+  const [ime, setIme] = useState<ImeState>({ text: '', buf: '' })
+  const [hint, setHint] = useState(false)
+  const typed = flush(ime)
+  const [res, setRes] = useState<'ok' | 'kata' | 'bad'>()
+  const shown = useRef(Date.now()), took = useRef(0)
+  const kata = /[ァ-ヶ]/.test(v.ja)
+  const check = () => {
+    if (!typed.trim()) return
+    took.current = Date.now() - shown.current
+    const a = typed.normalize('NFKC').replace(/\s/g, '')
+    setRes(a === v.ja ? 'ok' : toHira(a) === toHira(v.ja) ? 'kata' : 'bad')
+  }
+  const next = () => res && onAnswer(res === 'ok', took.current)
+  useEffect(() => {
+    if (!res) return
+    const f = (e: KeyboardEvent) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); next() } }
+    addEventListener('keydown', f)
+    return () => removeEventListener('keydown', f)
+  }, [res]) // eslint-disable-line react-hooks/exhaustive-deps
+  const how = (
+    <div className="kana-how">
+      <div className="muted small">입력 방법 (쿼티 자판)</div>
+      <div className="keys">{[...toRomaji(v.ja)].map((k, i) => <kbd key={i}>{k}</kbd>)}</div>
+      {kata && <div className="muted small">키보드 왼쪽 아래 あ 키를 눌러 ア(가타카나)로 바꾼 뒤 쳐요</div>}
+      {/[ゃゅょぁぃぅぇぉャュョァィゥェォっッ]/.test(v.ja) && <div className="muted small">작은 글자는 x를 먼저 쳐요 (ゃ = xya, っ = xtu). 받침처럼 겹치는 っ는 다음 자음을 두 번 (がっこう = gakkou)</div>}
+      {/[んン]/.test(v.ja) && <div className="muted small">ん은 n을 두 번 (nn)</div>}
+      {/ー/.test(v.ja) && <div className="muted small">길게 늘이는 ー는 빼기(-) 키</div>}
+    </div>
+  )
+  if (res) {
+    const m = res === 'ok' ? { cls: 'good', mark: '✓', title: '정답이에요!' } : res === 'kata' ? { cls: 'near', mark: '△', title: '아까워요! 가타카나로 바꿔야 해요' } : { cls: 'bad', mark: '✗', title: '틀렸어요' }
+    return (
+      <>
+        <div className={`card verdict ${m.cls}`}><div className="verdict-mark" aria-hidden>{m.mark}</div><div className="result-title">{m.title}</div></div>
+        <div className="card col">
+          {res !== 'ok' && <><div className="muted small">내 입력</div><div className="jp ans">{typed}</div></>}
+          <div className="muted small">정답</div>
+          <div className="jp big-ja">{v.ja} <span className="muted small">{v.ko}</span></div>
+          {how}
+        </div>
+        <div className="grow" />
+        {res !== 'ok' && <button className="btn wide" onClick={() => { setRes(undefined); setIme({ text: '', buf: '' }); shown.current = Date.now() }}>다시 입력</button>}
+        <button className="btn primary wide big" onClick={next}>다음</button>
+      </>
+    )
+  }
+  return (
+    <>
+      <div className="card flash-card">
+        <span className="tag info corner">{kata ? '가타카나 입력' : '히라가나 입력'}</span>
+        {tag && <span className="tag warn corner-r">{tag}</span>}
+        <div className="jp flash-ja">{v.ja}</div>
+        <button className="icon-btn round" aria-label="발음 듣기" onClick={() => speak(v.reading || v.ja)}>🔊</button>
+        <div className="muted">아래 키보드로 이 글자를 쳐 보세요</div>
+        <button className="link small" onClick={() => setHint(!hint)}>{hint ? '입력 방법 닫기' : '입력 방법 보기'}</button>
+        {hint && how}
+      </div>
+      <ImeDisplay ime={ime} placeholder="로마자로 치면 가나로 바뀌어요" />
+      <Keyboard ime={ime} onChange={setIme} onEnter={check} canEnter={!!typed.trim()} />
+    </>
+  )
+}
+
 // ── 예문 입력·채점 ──
 function DiffView({ g }: { g: Grade }) {
   return <div className="jp diff">{g.diff.map((p, i) => <span key={i} className={`d-${p.t}`}>{p.s}</span>)}</div>
 }
 
-function SentenceCard({ s, review: isReview, tag, readings, onDone }: { s: Sentence; review: boolean; tag?: string; readings: [string, string][]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
-  const blocks = s.src === 'practice' // 맛보기 연습: 블록을 순서대로 눌러 문장 만들기
-  const pieces = useMemo(() => (blocks ? shuffle(chunks(s.answers[0])) : []), [s.id]) // eslint-disable-line react-hooks/exhaustive-deps
+function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }: { s: Sentence; review: boolean; tag?: string; readings: [string, string][]; words?: string[]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
+  const blocks = s.src === 'practice' // 맛보기 연습: 블록을 순서대로 눌러 문장 만들기 (함정 블록 섞음)
+  const pieces = useMemo(() => {
+    if (!blocks) return []
+    const c = chunks(s.answers[0])
+    return shuffle([...c, ...traps(c, words)])
+  }, [s.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<number[]>([])
-  const [typed, setTyped] = useState('')
+  const [ime, setIme] = useState<ImeState>({ text: '', buf: '' })
+  const typed = flush(ime)
   const [result, setResult] = useState<{ g: Grade | null; answer: string }>()
   const shown = useRef(Date.now())
   const took = useRef(0)
-  useEffect(() => { setTyped(''); setPicked([]); setResult(undefined); shown.current = Date.now() }, [s.id])
+  useEffect(() => { setIme({ text: '', buf: '' }); setPicked([]); setResult(undefined); shown.current = Date.now() }, [s.id])
+  // 결과 화면에서 엔터 = 다음
+  useEffect(() => {
+    if (!result) return
+    const f = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || e.isComposing) return
+      e.preventDefault()
+      onDone(result.g, result.answer, took.current)
+    }
+    addEventListener('keydown', f)
+    return () => removeEventListener('keydown', f)
+  }, [result]) // eslint-disable-line react-hooks/exhaustive-deps
   const text = blocks ? picked.map(k => pieces[k]).join('') : typed
-  const ready = blocks ? picked.length === pieces.length : !!typed.trim()
+  const ready = blocks ? picked.length > 0 : !!typed.trim()
 
   const submit = (giveUp = false) => {
     took.current = Date.now() - shown.current
@@ -207,16 +292,13 @@ function SentenceCard({ s, review: isReview, tag, readings, onDone }: { s: Sente
             </div>
           </>
         ) : (
-          <>
-            <label className="muted small" htmlFor="answer">내 답안</label>
-            <textarea id="answer" className="jp answer-box" rows={3} value={typed} lang="ja"
-              onChange={e => setTyped(e.target.value)} placeholder="일본어로 입력 (가나만 써도 돼요)" />
-            <div className="muted small">끝의 。와 공백은 채점에서 무시해요</div>
-          </>
+          <ImeDisplay ime={ime} placeholder="로마자로 치면 가나로 바뀌어요 (한자 대신 가나로)" />
         )}
         <div className="grow" />
-        <button className="btn primary wide big" disabled={!ready} onClick={() => submit()}>{blocks ? '확인' : '채점하기'}</button>
+        {blocks && <button className="btn primary wide big" disabled={!ready} onClick={() => submit()}>확인</button>}
         <button className="btn ghost wide" onClick={() => submit(true)}>모르겠어요 · 정답 보기</button>
+        {/* 앱 키보드: 폰 키보드 대신. 확인 = 채점 */}
+        {!blocks && <Keyboard ime={ime} onChange={setIme} onEnter={() => submit()} enterLabel="채점하기" canEnter={ready} />}
       </>
     )
   }
@@ -224,7 +306,7 @@ function SentenceCard({ s, review: isReview, tag, readings, onDone }: { s: Sente
   const { g, answer } = result
   const ok = !!g?.ok
   // 말해보카식 판정: 정답 / 아까워요(거의 맞음) / 오답. 점수 숫자는 보여 주지 않는다
-  const v = ok ? { cls: 'good', mark: '✓', title: g?.kanaOnly ? '정답! 한자로도 써 봐요' : '정답이에요!' }
+  const v = ok ? { cls: 'good', mark: '✓', title: '정답이에요!' }
     : g && g.score >= 80 ? { cls: 'near', mark: '△', title: '아까워요!' }
     : { cls: 'bad', mark: '✗', title: g ? '틀렸어요' : '정답을 확인해 봐요' }
   const [first, ...rest] = g?.findings ?? []
@@ -244,9 +326,8 @@ function SentenceCard({ s, review: isReview, tag, readings, onDone }: { s: Sente
         )}
         {ok && <div className="jp big-ja"><Ja text={answer} /></div>}
         <div className="muted small">{s.answerBy === 'teacher' ? '정답 (선생님 작성 · 교재 정답 없음)' : `정답 · p.${s.page}`}</div>
-        {s.answers.map((a, i) => <div key={a} className="jp ans"><Ja text={a} kana={s.kana?.[i]} /></div>)}
-        {!!s.alts?.length && <div className="muted small">이렇게 써도 정답이에요</div>}
-        {s.alts?.map(a => <div key={a} className="jp ans alt"><Ja text={a} /></div>)}
+        {/* 대표 정답 하나만 (여러 개를 보여 주면 헷갈림) */}
+        <div className="jp ans"><Ja text={s.answers[0]} kana={s.kana?.[0]} /></div>
         <div className="muted small">{s.ko}</div>
         {g && !ok && (
           <details className="more">
@@ -258,7 +339,7 @@ function SentenceCard({ s, review: isReview, tag, readings, onDone }: { s: Sente
       </div>
       <div className="grow" />
       {!ok && g && !blocks && <button className="btn wide small-btn" onClick={accept}>내 답도 맞아요 · 정답 처리</button>}
-      {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setTyped(''); setPicked([]); shown.current = Date.now() }}>다시 입력</button>}
+      {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setIme({ text: '', buf: '' }); setPicked([]); shown.current = Date.now() }}>다시 입력</button>}
       <button className="btn primary wide big" onClick={() => onDone(g, answer, took.current)}>다음</button>
     </>
   )
@@ -298,6 +379,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
   // 복습 항목은 다른 단원에서도 오므로 교재 전체를 불러 둔다
   const vocabAll = useLiveQuery(() => db.vocab.where('bookId').equals(bookId).toArray(), [bookId])
   const sentAll = useLiveQuery(() => db.sentences.where('bookId').equals(bookId).toArray(), [bookId])
+  const vSched = useLiveQuery(async () => new Map((await db.schedules.where('unitId').startsWith(`${bookId}/`).filter(x => x.itemType === 'vocab').toArray()).map(x => [x.itemId, x])), [bookId])
   const [session, setSession] = useState<Session>()
   const [nothing, setNothing] = useState(false) // 오답만 학습인데 복습할 게 없음
   const busy = useRef(false) // 연타 방지: 한 항목에 답은 한 번만 (저장이 끝나면 풀림)
@@ -317,17 +399,22 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
   const isLast = !parts || parts.at(-1)?.id === partId
   const unitVocab = vocabAll?.filter(v => v.unitId === unitId) ?? []
   const unitSent = sentAll?.filter(s => s.unitId === unitId) ?? []
-  const order = new Map(unit?.data.sentences.map((s, i) => [`${unitId}/${s.id}`, i]))
   const V = ready && day ? pickVocab(unitVocab, day, isLast) : []
-  // 예문은 교재 순서대로 (DB는 id 순이라 실력 다지기가 먼저 나옴)
-  const S = ready && day ? pickSentences(unitSent, day, unitId).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)) : []
-  // 문법 카드: 실력 다지기는 3단계로, 맛보기 연습은 문제를 빼고 설명(노트·예문)이 있을 때만
-  const cards = day?.cards.filter(c => c.kind !== 'drill' && (c.kind !== 'practice' || c.blocks.some(b => b.t === 'note' || b.t === 'ex'))) ?? []
+  // 3단계 예문: 본문 예문 + 실력 다지기 (맛보기 연습은 2단계 문법 카드 사이에서). 큰 문제 순서는 지키고 그 안에서는 섞는다
+  const S = ready && day ? orderSentences(pickSentences(unitSent, day, unitId).filter(s => s.src !== 'practice'), day.cards, unitId) : []
+  // 2단계: 문법 카드, 맛보기 연습 문제는 그 카드 바로 뒤에 블록 배열로 (q:예문id). 실력 다지기 카드는 3단계로
+  const grammarItems = (day?.cards ?? []).filter(c => c.kind !== 'drill').flatMap(c => {
+    if (c.kind !== 'practice') return [c.id]
+    const qs = c.blocks.flatMap(b => (b.t === 'q' ? [`q:${unitId}/${b.ref}`] : []))
+    return [...(c.blocks.some(b => b.t === 'note' || b.t === 'ex') ? [c.id] : []), ...qs]
+  })
+  const cards = day?.cards ?? []
+  const words = unitVocab.map(v => v.ja)
 
   const queueFor = (step: Step, st: Session['state']) =>
-    step === 'vocab' ? V.map(v => v.id) :
-    step === 'vocab-review' ? [...st.wrongV, ...(st.dueV ?? [])] :
-    step === 'grammar' ? cards.map(c => c.id) :
+    step === 'vocab' ? st.newV ?? V.map(v => v.id) :
+    step === 'vocab-review' ? st.dueV ?? [] :
+    step === 'grammar' ? grammarItems :
     step === 'sentence' ? S.map(s => s.id) :
     step === 'sentence-review' ? [...st.wrongS, ...(st.dueS ?? [])] : []
 
@@ -363,7 +450,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
       let s = await db.sessions.where('key').equals(key).filter(x => !x.endedAt && x.date === today).last()
       if (!s) {
         const sched = await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray()
-        const st: Session['state'] = { step: 'vocab', queue: [], i: 0, pos: {}, learn: {}, wrongV: [], wrongS: [], tries: {} }
+        const st: Session['state'] = { step: 'vocab', queue: [], i: 0, pos: {}, wrongV: [], wrongS: [], tries: {} }
         if (reviewOnly) {
           // 아직 회복하지 못한 오답: 틀린 횟수 많은 것부터. 직접 고른 연습이라 오늘 본 것도 포함
           const weak = (t: 'vocab' | 'sentence', n: number) => sched
@@ -373,7 +460,9 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
           st.dueS = weak('sentence', 15)
           if (!st.dueV.length && !st.dueS.length) { setNothing(true); return } // 빈 복습은 기록하지 않음
         } else {
-          st.dueV = dueToday(sched, today, 'vocab', new Set(V.map(v => v.id)), DUE_LIMIT.vocab)
+          // 새 단어 = 아직 한 번도 안 본 단어 (지난 단원을 다시 해도 이미 배운 단어는 시간에 맞춰 복습에서만)
+          const seen = new Map(sched.map(x => [x.itemId, x]))
+          st.newV = V.filter(v => vocabState(seen.get(v.id)) === 'new').map(v => v.id)
           st.dueS = dueToday(sched, today, 'sentence', new Set(S.map(x => x.id)), DUE_LIMIT.sentence)
         }
         s = { key, unitId, partId, date: today, startedAt: Date.now(), activeMs: 0, state: st, stats: { vocab: 0, vocabOk: 0, sentences: 0, sentencesOk: 0, cards: 0 } }
@@ -384,6 +473,12 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
         }
       }
       let st = s.state
+      // 단어 복습은 지금 시각 기준으로 다시 계산 (오답만 학습은 고른 목록 그대로)
+      if (!reviewOnly) {
+        st = { ...st, dueV: dueVocab(await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray(), Date.now()) }
+        if (st.step === 'vocab-review') st = { ...st, queue: st.dueV!, i: 0 }
+        if (st.pos?.vocab?.step === 'vocab-review') st = { ...st, pos: { ...st.pos, vocab: { step: 'vocab-review', queue: st.dueV!, i: 0 } } }
+      }
       if (!st.pos) { // 옛 기록: 지금 단계 앞은 끝난 것으로
         const cur = stageOf(st.step), pos: Session['state']['pos'] = {}
         for (const x of STAGES.slice(0, STAGES.indexOf(cur))) pos[x] = { step: 'done', queue: [], i: 0 }
@@ -487,8 +582,8 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
     const cs = v.unitId === unitId && day ? day.cards : units.get(v.unitId)?.data.cards ?? []
     return cs.flatMap(c => c.blocks).find(b => b.t === 'ex' && b.ja.includes(v.ja)) as { ja: string; ko: string } | undefined
   }
-  const isDue = (id: string) => (st.dueV ?? []).includes(id) || (st.dueS ?? []).includes(id)
-  const dueTag = (id: string) => reviewOnly ? '오답' : isDue(id) && !st.wrongV.includes(id) && !st.wrongS.includes(id) ? '복습 예정' : undefined
+  const isDue = (id: string) => (st.dueS ?? []).includes(id)
+  const dueTag = (id: string) => reviewOnly ? '오답' : isDue(id) && !st.wrongS.includes(id) ? '복습 예정' : undefined
   const done = doneStages(st)
   const skip = <><div className="card">이 항목은 콘텐츠를 다시 가져오면서 없어졌어요.</div><button className="btn primary wide big" onClick={() => advance({}, {})}>건너뛰기</button></>
 
@@ -496,26 +591,42 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
 
   if (st.step === 'vocab' || st.step === 'vocab-review') {
     const v = vocabAll.find(x => x.id === st.queue[st.i])
+    const sc = v && vSched?.get(v.id)
+    const sch = !sc ? undefined : vocabState(sc) === 'learning' ? '학습 중' : '복습'
+    // 준비마당(히라가나·가타카나) 가나 낱말은 직접 입력
+    const kanaMode = !!v && /^c-2-/.test(v.unitId.slice(bookId.length + 1)) && /^[ぁ-ゟ゠-ヿー]+$/.test(v.ja)
+    const Card = kanaMode ? KanaCard : VocabCard
     body = !v ? skip : (
-      <VocabCard v={v} example={exampleFor(v)} tag={st.step === 'vocab-review' ? (st.learn?.[v.id] && !isDue(v.id) ? '한 번 더' : dueTag(v.id)) : undefined} onAnswer={once(async (know: boolean, ms: number) => {
-        const today = dayKey()
-        const prev = (await db.schedules.get(v.id)) ?? newSched(v.id, 'vocab', v.unitId, today)
-        const r = vocabAnswer(prev, st.learn?.[v.id], know, today)
-        await db.schedules.put(r.sched)
-        await db.reviews.add({ itemId: v.id, itemType: 'vocab', unitId: v.unitId, date: today, at: Date.now(), phase: phase(), correct: know, grade: know ? 'good' : 'again', responseMs: ms })
-        const learn = { ...st.learn }
-        if (r.learn) learn[v.id] = r.learn
-        else delete learn[v.id]
+      <Card key={v.id + st.i} v={v} example={exampleFor(v)} tag={st.step === 'vocab-review' ? sch : undefined} onAnswer={once(async (know: boolean, ms: number) => {
+        const now = Date.now(), today = dayKey(now)
         const isNew = st.step === 'vocab'
-        // 새 단어는 모두 한 번 더 (안키 학습 단계 10분) → 전환 화면 뒤 복습에서. 복습 중엔 졸업할 때까지 뒤로 다시
-        const wrongV = isNew && r.learn && !st.wrongV.includes(v.id) ? [...st.wrongV, v.id] : st.wrongV
-        await advance({ wrongV, learn }, isNew ? { vocab: session.stats.vocab + 1, vocabOk: session.stats.vocabOk + (know ? 1 : 0) } : {}, !isNew && !!r.learn)
+        await db.reviews.add({ itemId: v.id, itemType: 'vocab', unitId: v.unitId, date: today, at: now, phase: phase(), correct: know, grade: know ? 'good' : 'again', responseMs: ms })
+        if (reviewOnly) { await advance({}, {}, !know); return } // 오답만 학습은 연습: 일정은 그대로, 모르면 뒤로 다시
+        const prev = (await db.schedules.get(v.id)) ?? newSched(v.id, 'vocab', v.unitId, today)
+        await db.schedules.put(ankiAnswer(prev, know, now))
+        const dueV = dueVocab(await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray(), now)
+        const wrongV = isNew && !know && !st.wrongV.includes(v.id) ? [...st.wrongV, v.id] : st.wrongV
+        const stats = isNew ? { vocab: session.stats.vocab + 1, vocabOk: session.stats.vocabOk + (know ? 1 : 0) } : {}
+        if (isNew) { await advance({ dueV, wrongV }, stats); return }
+        // 복습: 매번 지금 시각 기준으로 다음 단어를 고른다. 나올 단어가 없으면 단계 끝
+        const next = { ...session, stats: { ...session.stats, ...stats }, state: { ...st, dueV, wrongV, queue: dueV, i: 0 } }
+        if (dueV.length) await save(next)
+        else await goStep('done', next)
       })} />
     )
   } else if (st.step === 'vocab-intro') {
-    const wrong = st.wrongV.filter(id => st.learn?.[id]?.wrong).length
-    body = <Intro title={`새 단어 ${V.length}개 완료!`} wrong={wrong} again={st.wrongV.length - wrong} due={st.dueV?.length ?? 0}
+    body = <Intro title={`새 단어 ${queueFor('vocab', st).length}개 완료!`} wrong={st.wrongV.length} again={0} due={st.dueV?.length ?? 0}
       items={queueFor('vocab-review', st).map(id => vocabAll.find(v => v.id === id)?.ja ?? '')} onGo={() => goStep('vocab-review')} />
+  } else if (st.step === 'grammar' && day && unit && st.queue[st.i]?.startsWith('q:')) {
+    // 맛보기 연습 (문법 카드 사이)
+    const s = sentAll.find(x => x.id === st.queue[st.i].slice(2))
+    body = !s ? skip : (
+      <SentenceCard s={s} review={false} readings={readings} words={words} onDone={once(async (g: Grade | null, answer: string, ms: number) => {
+        const sg = sentenceGrade(g)
+        await record(s, sg.grade, { correct: !!g?.ok, score: g?.score ?? 0, answer, responseMs: ms }, sg.error)
+        await advance({}, {})
+      })} />
+    )
   } else if (st.step === 'grammar' && day && unit) {
     const c = cards.find(x => x.id === st.queue[st.i])
     const sMap = new Map(unitSent.map(s => [s.id.slice(unitId.length + 1), s]))
@@ -536,7 +647,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
     const s = sentAll.find(x => x.id === st.queue[st.i])
     const isReview = st.step === 'sentence-review'
     body = !s ? skip : (
-      <SentenceCard s={s} review={isReview} readings={readings} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 해 보세요') : undefined}
+      <SentenceCard s={s} review={isReview} readings={readings} words={words} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 해 보세요') : undefined}
         onDone={once(async (g: Grade | null, answer: string, ms: number) => {
           const ok = !!g?.ok
           const sg = sentenceGrade(g)
@@ -569,7 +680,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
   } else {
     const { vocab, vocabOk, sentences, sentencesOk, cards: nCards } = session.stats
     const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '–')
-    const rv = (st.dueV?.length ?? 0) + st.wrongV.length, rs = (st.dueS?.length ?? 0) + st.wrongS.length
+    const rv = st.dueV?.length ?? 0, rs = (st.dueS?.length ?? 0) + st.wrongS.length
     body = (
       <>
         <div className="intro-check">✓</div>
@@ -578,7 +689,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
           {reviewOnly ? '오답 노트' : `${unit?.data.title}${day?.title ? ` ${day.title}` : ''}`} · 실제 학습 {Math.max(1, Math.round(active.current / 60000))}분
         </div>
         <div className="card list-card">
-          {!reviewOnly && <div className="item-row"><div className="grow"><b>1 단어 암기</b><div className="muted small">새 단어 {vocab} · 복습 {rv}</div></div><b className="accent-text">{pct(vocabOk, vocab)}</b></div>}
+          {!reviewOnly && <div className="item-row"><div className="grow"><b>1 단어 암기</b><div className="muted small">새 단어 {vocab}{rv ? ` · 곧 다시 나올 단어 ${rv}` : ''}</div></div><b className="accent-text">{pct(vocabOk, vocab)}</b></div>}
           {reviewOnly && <div className="item-row"><div className="grow"><b>오답 단어</b><div className="muted small">{rv}개 복습</div></div></div>}
           {!reviewOnly && <div className="item-row"><div className="grow"><b>2 문법 카드</b><div className="muted small">{nCards}장</div></div><b className="accent-text">완료</b></div>}
           {!reviewOnly && <div className="item-row"><div className="grow"><b>3 예문 작성</b><div className="muted small">새 예문 {sentences} · 복습 {rs}</div></div><b className="accent-text">{pct(sentencesOk, sentences)}</b></div>}

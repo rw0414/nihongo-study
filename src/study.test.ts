@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dayContent, diff, grade, nextDay, normalize, pickSentences, pickVocab, streak, chunks, shuffle } from './study'
+import { dayContent, diff, grade, nextDay, normalize, pickSentences, pickVocab, streak, chunks, shuffle, traps, orderSentences, stagePercent, stars } from './study'
 import type { UnitContent } from './content'
 
 const s = { answers: ['妻は主婦ではありません。'], alts: ['妻は主婦じゃありません。'], kana: ['つまはしゅふではありません。', 'つまはしゅふじゃありません。'] }
@@ -106,4 +106,43 @@ describe('실력 다지기 중복 제거', () => {
     { id: 'u/s-d2', src: 'drill', grammar: [], page: 1, answers: ['それは本だ'] },
   ]
   it('본문 예문과 같은 실력 다지기 문제는 빠짐', () => expect(pickSentences(all, day, 'u').map(s => s.id)).toEqual(['u/s-e1', 'u/s-d2']))
+})
+
+describe('맛보기 함정·예문 순서', () => {
+  const seq = (...xs: number[]) => { let i = 0; return () => xs[i++ % xs.length] }
+  it('함정은 문장 길이에 따라 1~3개, 정답 블록과 겹치지 않음', () => {
+    const b = ['私', 'は', '韓国人', 'じゃ', 'ありません', 'でした']
+    const t = traps(b, ['日本人', '私たち', '韓国'], seq(0))
+    expect(t).toHaveLength(2)
+    expect(t[0]).toBe('が')
+    expect(t.some(x => b.includes(x))).toBe(false)
+    expect(traps(['冬', 'は', '寒い'], [], seq(0))).toEqual(['が'])
+    expect(traps(['この', '部屋', 'は', '狭い', 'です', 'ね', 'とても'], [], seq(0.99))).toContain('広い')
+  })
+  it('큰 문제 순서는 지키고 안에서는 섞음', () => {
+    const cards = [
+      { id: 'a', kind: 'grammar', page: 1, title: '', grammar: 'g1', blocks: [] },
+      { id: 'b', kind: 'drill', page: 2, title: '', blocks: [{ t: 'p', text: '① 표' }, { t: 'q', ref: 'd1' }, { t: 'q', ref: 'd2' }, { t: 'p', text: '② 문장' }, { t: 'q', ref: 'd3' }] },
+    ] as never
+    const S = [{ id: 'u/d3', grammar: [] }, { id: 'u/d1', grammar: [] }, { id: 'u/s-e1', grammar: ['g1'] }, { id: 'u/d2', grammar: [] }]
+    const o = orderSentences(S, cards, 'u', seq(0.9, 0.1)).map(s => s.id)
+    expect(o[0]).toBe('u/s-e1')
+    expect(o.slice(1, 3).sort()).toEqual(['u/d1', 'u/d2'])
+    expect(o[3]).toBe('u/d3')
+  })
+})
+
+describe('로드맵', () => {
+  it('단계 진행률', () => {
+    expect(stagePercent('vocab')).toBe(0)
+    expect(stagePercent('vocab', { step: 'vocab', queue: ['a', 'b'], i: 1 })).toBe(35)
+    expect(stagePercent('vocab', { step: 'vocab-review', queue: ['a'], i: 0 })).toBe(70)
+    expect(stagePercent('grammar', { step: 'grammar', queue: ['a', 'b', 'c', 'd'], i: 3 })).toBe(75)
+    expect(stagePercent('sentence', { step: 'done', queue: [], i: 0 })).toBe(100)
+  })
+  it('별 개수', () => {
+    expect(stars({ vocab: 10, vocabOk: 10, sentences: 10, sentencesOk: 9 })).toBe(3)
+    expect(stars({ vocab: 10, vocabOk: 7, sentences: 0, sentencesOk: 0 })).toBe(2)
+    expect(stars({ vocab: 10, vocabOk: 3, sentences: 10, sentencesOk: 5 })).toBe(1)
+  })
 })

@@ -16,22 +16,17 @@ export default function Reader({ bookId, page }: { bookId: string; page: number 
 
   const chapter = chapters && chapterAt(chapters, page)
 
-  // 마지막으로 본 쪽 저장, 처음 연 목차는 '학습 중'으로 표시
+  // 마지막으로 본 쪽만 저장. 원본은 참고·대조용이라 열람해도 학습 진도에는 반영하지 않는다
   useEffect(() => {
     db.books.update(bookId, { lastPage: page, lastOpenedAt: Date.now() })
     scroller.current?.scrollTo(0, 0)
   }, [bookId, page])
-  useEffect(() => {
-    if (chapter?.status === 'new') db.chapters.update(chapter.id, { status: 'reading' })
-  }, [chapter])
 
   if (book === undefined) return null
   if (!book) return <p style={{ padding: 20 }}>교재를 찾을 수 없습니다. 라이브러리에서 다시 추가해 주세요.</p>
   const move = (p: number) => {
     if (p >= 1 && p <= book.pageCount) location.replace(`#/read/${bookId}/${p}`) // 쪽 이동은 뒤로가기 기록에 쌓지 않음
   }
-  const toggleDone = () =>
-    chapter && db.chapters.update(chapter.id, { status: chapter.status === 'done' ? 'reading' : 'done' })
 
   return (
     <div className="reader">
@@ -58,11 +53,6 @@ export default function Reader({ bookId, page }: { bookId: string; page: number 
         <span className="muted small center">
           p.{printedPage(page, book.printedPageOffset)}<br />{page}/{book.pageCount}
         </span>
-        {chapter && (
-          <button className={`btn ${chapter.status === 'done' ? 'done' : ''}`} onClick={toggleDone}>
-            {chapter.status === 'done' ? '✓ 완료' : '완료'}
-          </button>
-        )}
         <button className="btn" disabled={page >= book.pageCount} onClick={() => move(page + 1)}>다음 ›</button>
       </footer>
     </div>

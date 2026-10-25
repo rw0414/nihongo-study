@@ -56,7 +56,7 @@ export default function Notes() {
   /** 사용자가 다시 학습 대상으로 지정: 오늘 복습에 나오게 */
   const relearn = (ids: string[]) =>
     db.transaction('rw', db.schedules, async () => {
-      for (const id of ids) await db.schedules.update(id, { due: today, lastDate: addDays(today, -1) })
+      for (const id of ids) await db.schedules.update(id, { due: today, lastDate: addDays(today, -1), dueAt: undefined })
     })
 
   const mainCause = (s: Sched) => {
