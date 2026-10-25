@@ -8,8 +8,6 @@ import { go } from '../App'
 import { Ja } from '../Ja'
 import { hanjaOf } from '../hanja'
 import { toRomaji } from '../romaji'
-import Keyboard, { ImeDisplay } from '../Keyboard'
-import { flush, type ImeState } from '../ime'
 
 // 오늘의 학습 루틴. 세 단계는 홈에서 골라 어느 것부터 해도 되고, 단계마다 진행 위치를 따로 기억한다.
 // 1단계 단어: 새 단어(처음 보는 단어만) → 전환 화면 → 복습. 복습은 안키처럼 시간이 된 단어만 나온다 (1분·10분 학습 단계, 며칠 뒤 복습)
@@ -162,9 +160,8 @@ function VocabCard({ v, example, tag, onAnswer }: { v: Vocab; example?: { ja: st
 // ── 준비마당 가나: 보이는 글자를 일본어 키보드로 직접 입력 (스와이프 대신) ──
 const toHira = (s: string) => s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
 function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (know: boolean, ms: number) => void }) {
-  const [ime, setIme] = useState<ImeState>({ text: '', buf: '' })
+  const [typed, setTyped] = useState('')
   const [hint, setHint] = useState(false)
-  const typed = flush(ime)
   const [res, setRes] = useState<'ok' | 'kata' | 'bad'>()
   const shown = useRef(Date.now()), took = useRef(0)
   const kata = /[ァ-ヶ]/.test(v.ja)
@@ -185,7 +182,7 @@ function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (kno
     <div className="kana-how">
       <div className="muted small">입력 방법 (쿼티 자판)</div>
       <div className="keys">{[...toRomaji(v.ja)].map((k, i) => <kbd key={i}>{k}</kbd>)}</div>
-      {kata && <div className="muted small">키보드 왼쪽 아래 あ 키를 눌러 ア(가타카나)로 바꾼 뒤 쳐요</div>}
+      {kata && <div className="muted small">로마자로 친 뒤 키보드 위 후보에서 가타카나를 골라요 (PC는 F7)</div>}
       {/[ゃゅょぁぃぅぇぉャュョァィゥェォっッ]/.test(v.ja) && <div className="muted small">작은 글자는 x를 먼저 쳐요 (ゃ = xya, っ = xtu). 받침처럼 겹치는 っ는 다음 자음을 두 번 (がっこう = gakkou)</div>}
       {/[んン]/.test(v.ja) && <div className="muted small">ん은 n을 두 번 (nn)</div>}
       {/ー/.test(v.ja) && <div className="muted small">길게 늘이는 ー는 빼기(-) 키</div>}
@@ -203,7 +200,7 @@ function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (kno
           {how}
         </div>
         <div className="grow" />
-        {res !== 'ok' && <button className="btn wide" onClick={() => { setRes(undefined); setIme({ text: '', buf: '' }); shown.current = Date.now() }}>다시 입력</button>}
+        {res !== 'ok' && <button className="btn wide" onClick={() => { setRes(undefined); setTyped(''); shown.current = Date.now() }}>다시 입력</button>}
         <button className="btn primary wide big" onClick={next}>다음</button>
       </>
     )
@@ -215,12 +212,24 @@ function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (kno
         {tag && <span className="tag warn corner-r">{tag}</span>}
         <div className="jp flash-ja">{v.ja}</div>
         <button className="icon-btn round" aria-label="발음 듣기" onClick={() => speak(v.reading || v.ja)}>🔊</button>
-        <div className="muted">아래 키보드로 이 글자를 쳐 보세요</div>
-        <button className="link small" onClick={() => setHint(!hint)}>{hint ? '입력 방법 닫기' : '입력 방법 보기'}</button>
-        {hint && how}
+        <div className="muted">이 글자를 일본어 키보드로 입력해 보세요</div>
       </div>
-      <ImeDisplay ime={ime} placeholder="로마자로 치면 가나로 바뀌어요" />
-      <Keyboard ime={ime} onChange={setIme} onEnter={check} canEnter={!!typed.trim()} />
+      <input className="jp answer-box kana-input" value={typed} lang="ja" enterKeyHint="done" autoFocus placeholder="여기에 입력"
+        onChange={e => setTyped(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); check() } }} />
+      <div className="row">
+        <button className="btn grow" onClick={() => setHint(!hint)}>{hint ? '입력 방법 닫기' : '입력 방법 보기'}</button>
+        <button className="btn grow primary" disabled={!typed.trim()} onClick={check}>확인</button>
+      </div>
+      {hint && <div className="card">{how}</div>}
+      <details className="more card">
+        <summary>일본어 키보드 설정 방법</summary>
+        <ol className="small">
+          <li>갤럭시(삼성 키보드): 설정 → 일반 → 삼성 키보드 설정 → 언어 및 유형 → 입력 언어 관리 → 日本語 켜기 → 日本語를 눌러 <b>쿼티(QWERTY)</b> 선택</li>
+          <li>Gboard·아이폰: 설정 → 키보드 → 키보드 추가 → 일본어 → <b>로마자(QWERTY)</b></li>
+          <li>입력할 때 키보드의 🌐 또는 스페이스바를 옆으로 밀어 일본어로 바꿔요. 로마자로 치면 히라가나가 나와요</li>
+        </ol>
+      </details>
     </>
   )
 }
@@ -238,12 +247,11 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
     return shuffle([...c, ...traps(c, words)])
   }, [s.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<number[]>([])
-  const [ime, setIme] = useState<ImeState>({ text: '', buf: '' })
-  const typed = flush(ime)
+  const [typed, setTyped] = useState('')
   const [result, setResult] = useState<{ g: Grade | null; answer: string }>()
   const shown = useRef(Date.now())
   const took = useRef(0)
-  useEffect(() => { setIme({ text: '', buf: '' }); setPicked([]); setResult(undefined); shown.current = Date.now() }, [s.id])
+  useEffect(() => { setTyped(''); setPicked([]); setResult(undefined); shown.current = Date.now() }, [s.id])
   // 결과 화면에서 엔터 = 다음
   useEffect(() => {
     if (!result) return
@@ -292,13 +300,22 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
             </div>
           </>
         ) : (
-          <ImeDisplay ime={ime} placeholder="로마자로 치면 가나로 바뀌어요 (한자 대신 가나로)" />
+          <>
+            <label className="muted small" htmlFor="answer">내 답안</label>
+            <textarea id="answer" className="jp answer-box" rows={3} value={typed} lang="ja" enterKeyHint="done"
+              onChange={e => setTyped(e.target.value)} placeholder="일본어로 입력 (가나만 써도 돼요)"
+              onKeyDown={e => {
+                // 키보드의 확인(엔터) = 채점. 일본어 변환 중의 엔터는 변환 확정이라 그대로 둔다
+                if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                e.preventDefault()
+                if (ready) submit()
+              }} />
+            <div className="muted small">끝의 。와 공백은 채점에서 무시해요</div>
+          </>
         )}
         <div className="grow" />
-        {blocks && <button className="btn primary wide big" disabled={!ready} onClick={() => submit()}>확인</button>}
+        <button className="btn primary wide big" disabled={!ready} onClick={() => submit()}>{blocks ? '확인' : '채점하기'}</button>
         <button className="btn ghost wide" onClick={() => submit(true)}>모르겠어요 · 정답 보기</button>
-        {/* 앱 키보드: 폰 키보드 대신. 확인 = 채점 */}
-        {!blocks && <Keyboard ime={ime} onChange={setIme} onEnter={() => submit()} enterLabel="채점하기" canEnter={ready} />}
       </>
     )
   }
@@ -306,7 +323,7 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
   const { g, answer } = result
   const ok = !!g?.ok
   // 말해보카식 판정: 정답 / 아까워요(거의 맞음) / 오답. 점수 숫자는 보여 주지 않는다
-  const v = ok ? { cls: 'good', mark: '✓', title: '정답이에요!' }
+  const v = ok ? { cls: 'good', mark: '✓', title: g?.kanaOnly ? '정답! 한자로도 써 봐요' : '정답이에요!' }
     : g && g.score >= 80 ? { cls: 'near', mark: '△', title: '아까워요!' }
     : { cls: 'bad', mark: '✗', title: g ? '틀렸어요' : '정답을 확인해 봐요' }
   const [first, ...rest] = g?.findings ?? []
@@ -339,7 +356,7 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
       </div>
       <div className="grow" />
       {!ok && g && !blocks && <button className="btn wide small-btn" onClick={accept}>내 답도 맞아요 · 정답 처리</button>}
-      {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setIme({ text: '', buf: '' }); setPicked([]); shown.current = Date.now() }}>다시 입력</button>}
+      {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setTyped(''); setPicked([]); shown.current = Date.now() }}>다시 입력</button>}
       <button className="btn primary wide big" onClick={() => onDone(g, answer, took.current)}>다음</button>
     </>
   )

@@ -375,18 +375,3 @@ details.more.card ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
 .app { overflow-x: clip; }
 .road-node.has-start { padding-top: 34px; } .road-node.has-start .start-bubble { top: 4px; }
 
-/* 앱 키보드 (말해보카식) */
-.ime-display { min-height: 64px; padding: 14px 16px; border-radius: 16px; background: var(--surface); border: 2px solid var(--accent); font-size: 22px; line-height: 1.5; word-break: break-all; }
-.ime-display.empty { border-color: var(--line); }
-.ime-display u { color: var(--accent); text-decoration-thickness: 2px; }
-.ime-display .caret { display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; vertical-align: -0.15em; background: var(--accent); animation: blink 1s steps(1) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-.kb { margin: 4px -12px calc(-8px - env(safe-area-inset-bottom)); padding: 8px 4px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-2); border-radius: 18px 18px 0 0; display: flex; flex-direction: column; gap: 8px; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
-.kb-row { display: flex; gap: 5px; justify-content: center; }
-.kb-row.r2 { padding: 0 5%; }
-.kb-key { flex: 1; min-width: 0; height: 46px; border: none; border-radius: 9px; background: var(--surface); color: var(--ink); font: inherit; font-size: 19px; box-shadow: 0 2px 0 var(--line); cursor: pointer; transition: transform .06s, background-color .06s; -webkit-tap-highlight-color: transparent; }
-.kb-key.down { transform: translateY(2px) scale(.94); box-shadow: 0 0 0 var(--line); background: var(--accent-soft); }
-.kb-mod { flex: 1.4; background: var(--line); font-size: 17px; }
-.kb-mod.on { background: var(--accent); color: var(--accent-ink); }
-.kb-enter { flex: 3.4; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 17px; box-shadow: 0 2px 0 var(--accent-strong); }
-.kb-enter.off { opacity: .45; }

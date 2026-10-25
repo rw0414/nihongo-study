@@ -167,10 +167,8 @@ export interface UserSettings {
   goalMinutes: number // 하루 학습 목표(분)
   streakRule: 'routine' | 'minutes' // 연속 학습으로 인정하는 기준: 루틴 1회 완료 / 목표 시간 달성
   furigana: boolean // 모든 한자에 후리가나
-  keySound: boolean // 앱 키보드 소리
-  keyHaptic: boolean // 앱 키보드 진동
 }
-export const DEFAULT_SETTINGS: UserSettings = { goalMinutes: 15, streakRule: 'routine', furigana: true, keySound: true, keyHaptic: true }
+export const DEFAULT_SETTINGS: UserSettings = { goalMinutes: 15, streakRule: 'routine', furigana: true }
 
 export async function getSettings(): Promise<UserSettings> {
   const rows = await db.settings.toArray()

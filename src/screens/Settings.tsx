@@ -136,14 +136,6 @@ function GoalCard() {
         <span className="grow">모든 한자에 후리가나(읽기) 표시</span>
         <input type="checkbox" checked={st.furigana} onChange={e => setSetting('furigana', e.target.checked)} />
       </label>
-      <label className="row small">
-        <span className="grow">키보드 누를 때 소리</span>
-        <input type="checkbox" checked={st.keySound} onChange={e => setSetting('keySound', e.target.checked)} />
-      </label>
-      <label className="row small">
-        <span className="grow">키보드 누를 때 진동 (안드로이드)</span>
-        <input type="checkbox" checked={st.keyHaptic} onChange={e => setSetting('keyHaptic', e.target.checked)} />
-      </label>
     </div>
   )
 }
