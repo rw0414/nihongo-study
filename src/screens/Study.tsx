@@ -182,7 +182,7 @@ function KanaCard({ v, n, tag, onAnswer }: { v: Vocab; n: string; tag?: string; 
   const [panel, setPanel] = useState<'how' | 'setup'>()
   const [res, setRes] = useState<'ok' | 'kata' | 'bad'>()
   const shown = useRef(Date.now()), took = useRef(0)
-  const inp = useRef<HTMLInputElement>(null)
+  const inp = useRef<HTMLTextAreaElement>(null)
   const kata = /[ァ-ヶ]/.test(v.ja)
   useKeyboardFrame()
   // 다음 글자: 입력칸은 그대로, 내용만 비운다
@@ -232,7 +232,8 @@ function KanaCard({ v, n, tag, onAnswer }: { v: Vocab; n: string; tag?: string; 
         )}
       </div>
       <div className="kana-row">
-        <input ref={inp} className="jp answer-box kana-input" value={typed} lang="ja" autoFocus autoComplete="off" autoCorrect="off" spellCheck={false}
+        {/* 한 줄 입력칸(input)이면 크롬이 키보드 위에 비밀번호·카드·주소 자동 완성 막대를 띄워서 여러 줄 입력칸(textarea)을 한 줄 높이로 씀 */}
+        <textarea ref={inp} rows={1} className="jp answer-box kana-input" value={typed} lang="ja" autoFocus autoComplete="off" autoCorrect="off" spellCheck={false}
           enterKeyHint={res ? 'next' : 'done'} placeholder="여기에 입력"
           onChange={e => { if (!res) setTyped(e.target.value) }}
           onBlur={() => requestAnimationFrame(() => inp.current?.focus())}
