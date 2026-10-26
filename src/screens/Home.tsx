@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, getSettings, STAGES, type Chapter, type Session, type Stage } from '../db'
 import { doneDays, minutesByDay } from '../stats'
-import { dayKey, stagePercent, stars, streak } from '../study'
+import { dayKey, stagePercent, streak } from '../study'
 import { leafChapters } from '../book'
 import { go } from '../App'
 import InstallCard from '../InstallCard'
@@ -11,7 +11,6 @@ import InstallCard from '../InstallCard'
 // 홈 = 게임 같은 로드맵. 하루 분량(단원 또는 그 part) 하나가 스테이지 하나.
 // 지난 스테이지는 다시, 앞 스테이지도 미리 할 수 있다. 변환 전 단원은 잠김(준비 중).
 
-const today = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })
 const LABEL: Record<Stage, string> = { vocab: '단어 암기', grammar: '문법 카드', sentence: '예문 작성' }
 const ICON: Record<Stage, string> = { vocab: '🃏', grammar: '📖', sentence: '✏️' }
 const ZIG = [0, 56, 84, 56, 0, -56, -84, -56] // 지그재그 길
@@ -67,8 +66,22 @@ export default function Home() {
     return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings) }
   }, [book?.id])
   const [sel, setSel] = useState<string>()
+  const [sheetH, setSheetH] = useState(0)
   const curRef = useRef<HTMLDivElement>(null)
+  const sheetRef = useRef<HTMLDivElement>(null)
   useEffect(() => { curRef.current?.scrollIntoView({ block: 'center' }) }, [data === undefined]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 스테이지를 누르면: 아래에서 시트가 올라오고, 그 스테이지가 시트를 뺀 남은 화면의 가운데로 오게 부드럽게 스크롤
+  useEffect(() => {
+    if (!sel) { setSheetH(0); return }
+    const h = sheetRef.current?.offsetHeight ?? 0
+    setSheetH(h) // 맨 아래 스테이지도 가운데로 올 수 있게 그만큼 여백
+    setTimeout(() => { // 시트가 그려진 다음에
+      const el = document.querySelector(`[data-stage="${CSS.escape(sel)}"] .stage`) // 동그란 스테이지 버튼 기준
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      window.scrollBy({ top: r.top + r.height / 2 - (innerHeight - h) / 2, behavior: 'smooth' })
+    })
+  }, [sel])
 
   if (book === undefined || (book && !data)) return null
   if (!book || !data) {
@@ -95,11 +108,13 @@ export default function Home() {
     return parts.map(p => {
       const key = `${c.id}#${p?.id ?? 'all'}`
       const ended = data.sessions.filter(s => s.key === key && s.endedAt)
-      const best = Math.max(0, ...ended.map(s => stars(s.stats)))
-      return {
+      const node: Node = {
         key, unitId: c.id, partId: p?.id, title: c.title, partTitle: p?.title, section: top(c).title, locked: !u,
-        done: ended.length > 0, stars: best, open: data.sessions.find(s => s.key === key && !s.endedAt && s.date === t),
+        done: ended.length > 0, stars: 0, open: data.sessions.find(s => s.key === key && !s.endedAt && s.date === t),
       }
+      // 별 = 끝낸 단계 수 (단어·문법·예문 하나당 1개, 클리어하면 3개)
+      node.stars = Object.values(percents(node)).filter(x => x >= 100).length
+      return node
     })
   })
   const openNode = nodes.find(n => n.open)
@@ -110,39 +125,23 @@ export default function Home() {
   const days = streak(data.doneSet)
   const todayMin = Math.round(data.minutes.get(t) ?? 0)
   const clear = nodes.filter(n => n.done).length, total = nodes.filter(n => !n.locked).length
+  const starRow = (n: Node) => <div className="stars">{'★'.repeat(n.stars)}<span className="off">{'★'.repeat(3 - n.stars)}</span></div>
 
   let lastSection = ''
   let k = 0
   return (
     <>
-      <div className="row" style={{ alignItems: 'flex-end' }}>
-        <div className="grow">
-          <div className="sub">{today}</div>
-          <h1>오늘의 학습</h1>
-        </div>
+      {/* 홈 = 로드맵. 위에는 한 줄 요약만 */}
+      <div className="home-top">
         <span className="streak">🔥 {days}일</span>
+        <span className="muted small">오늘 {todayMin}분 / {data.goal}분</span>
+        <span className="grow" />
+        <span className="muted small">{clear} / {total} 클리어</span>
       </div>
       <InstallCard />
 
-      {/* 오늘 할 스테이지 */}
-      {current ? (
-        <div className="card now-card">
-          <div className="row">
-            <span className="tag info">스테이지 {nodes.indexOf(current) + 1}</span>
-            <span className="grow" />
-            <span className="muted small">오늘 {todayMin}분 / {data.goal}분</span>
-          </div>
-          <div className="now-title">{current.title}{current.partTitle ? ` ${current.partTitle}` : ''}</div>
-          {STAGES.map(s => <Gauge key={s} stage={s} pct={percents(current)[s]} onClick={() => start(current, s)} />)}
-          <button className="btn primary wide big start-btn" onClick={() => start(current)}>{current.open ? '이어서 하기' : '▶ 시작하기'}</button>
-          <div className="muted small center">세 칸을 모두 채우면 스테이지 클리어! 원하는 칸부터 눌러도 돼요</div>
-        </div>
-      ) : (
-        <div className="card"><b>준비된 스테이지를 모두 깼어요! 🎉</b><div className="sub">다음 단원이 준비되면 길이 이어져요.</div></div>
-      )}
-
       {/* 로드맵 */}
-      <div className="legend small muted"><span><i className="dot done" />클리어</span><span><i className="dot now" />지금</span><span><i className="dot" />앞으로</span><span>🔒 준비 중</span></div>
+      <div className="legend small muted"><span><i className="dot done" />클리어</span><span><i className="dot now" />진행 중</span><span><i className="dot" />앞으로</span><span>🔒 준비 중</span><span className="stars">★</span><span>= 끝낸 단계</span></div>
       <div className="road">
         {nodes.map(n => {
           const head = n.section !== lastSection ? (lastSection = n.section) : null
@@ -151,30 +150,30 @@ export default function Home() {
           return (
             <div key={n.key}>
               {head && <div className="road-section">{head}</div>}
-              <div className={`road-node ${isNow ? "has-start" : ""}`} style={{ transform: `translateX(${x}px)` }} ref={isNow ? curRef : undefined}>
-                {isNow && <div className="start-bubble">START</div>}
-                <button className={`stage ${n.done ? 'done' : ''} ${isNow ? 'now' : ''} ${n.locked ? 'locked' : ''}`} disabled={n.locked}
+              <div className={`road-node ${isNow ? "has-start" : ""}`} style={{ transform: `translateX(${x}px)` }} ref={isNow ? curRef : undefined} data-stage={n.key}>
+                {isNow && <div className="start-bubble">진행 중</div>}
+                <button className={`stage ${n.done ? 'done' : ''} ${isNow ? 'now' : ''} ${n.locked ? 'locked' : ''} ${n.key === sel ? 'sel' : ''}`} disabled={n.locked}
                   aria-label={`${n.title}${n.partTitle ?? ''}${n.done ? ' 클리어' : ''}`} onClick={() => setSel(n.key)}>
                   {n.locked ? '🔒' : n.done ? '✓' : nodes.indexOf(n) + 1}
                 </button>
-                {n.done && <div className="stars">{'★'.repeat(n.stars)}<span className="off">{'★'.repeat(3 - n.stars)}</span></div>}
+                {(n.done || isNow || n.stars > 0) && starRow(n)}
                 <div className="road-label">{n.title.replace(/^\d+\s*/, '')}{n.partTitle ? ` ${n.partTitle}` : ''}</div>
               </div>
             </div>
           )
         })}
       </div>
-      <div className="muted small center">스테이지 {clear} / {total} 클리어</div>
+      {sheetH > 0 && <div style={{ height: sheetH }} aria-hidden />}
 
       {/* 스테이지 시트 */}
       {/* body에 바로 붙인다: 화면 전환 애니메이션(transform) 안에 있으면 fixed가 화면이 아니라 긴 페이지 기준이 되어 시트가 화면 밖으로 나감 */}
       {selected && createPortal(
         <div className="sheet-back" onClick={() => setSel(undefined)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
+          <div className="sheet" ref={sheetRef} onClick={e => e.stopPropagation()}>
             <div className="sheet-handle" />
             <div className="row">
               <span className="tag info">스테이지 {nodes.indexOf(selected) + 1}</span>
-              {selected.done && <span className="stars">{'★'.repeat(selected.stars)}<span className="off">{'★'.repeat(3 - selected.stars)}</span></span>}
+              {starRow(selected)}
               <span className="grow" />
               <button className="icon-btn" aria-label="닫기" onClick={() => setSel(undefined)}>✕</button>
             </div>
