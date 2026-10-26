@@ -159,12 +159,34 @@ function VocabCard({ v, example, tag, onAnswer }: { v: Vocab; example?: { ja: st
 
 // ── 준비마당 가나: 보이는 글자를 일본어 키보드로 직접 입력 (스와이프 대신) ──
 const toHira = (s: string) => s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
-function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (know: boolean, ms: number) => void }) {
+/**
+ * 입력 화면에서는 폰 키보드가 늘 올라와 있게: 입력칸은 카드가 바뀌어도 그대로 두고(키보드가 내려가지 않음) 포커스를 지킨다.
+ * 화면 높이는 키보드를 뺀 '보이는 영역'(visualViewport)에 맞춘다.
+ */
+function useKeyboardFrame() {
+  useEffect(() => {
+    const vv = window.visualViewport
+    const fit = () => {
+      document.documentElement.style.setProperty('--vvh', `${vv ? vv.height : innerHeight}px`)
+      if (vv && vv.offsetTop) window.scrollTo(0, 0) // 아이폰이 입력칸을 보이려고 화면을 밀어 올린 것 되돌리기
+    }
+    fit()
+    vv?.addEventListener('resize', fit)
+    vv?.addEventListener('scroll', fit)
+    return () => { vv?.removeEventListener('resize', fit); vv?.removeEventListener('scroll', fit); document.documentElement.style.removeProperty('--vvh') }
+  }, [])
+}
+
+function KanaCard({ v, n, tag, onAnswer }: { v: Vocab; n: string; tag?: string; onAnswer: (know: boolean, ms: number) => void }) {
   const [typed, setTyped] = useState('')
-  const [hint, setHint] = useState(false)
+  const [panel, setPanel] = useState<'how' | 'setup'>()
   const [res, setRes] = useState<'ok' | 'kata' | 'bad'>()
   const shown = useRef(Date.now()), took = useRef(0)
+  const inp = useRef<HTMLInputElement>(null)
   const kata = /[ァ-ヶ]/.test(v.ja)
+  useKeyboardFrame()
+  // 다음 글자: 입력칸은 그대로, 내용만 비운다
+  useEffect(() => { setTyped(''); setRes(undefined); setPanel(undefined); shown.current = Date.now(); inp.current?.focus() }, [n])
   const check = () => {
     if (!typed.trim()) return
     took.current = Date.now() - shown.current
@@ -172,65 +194,60 @@ function KanaCard({ v, tag, onAnswer }: { v: Vocab; tag?: string; onAnswer: (kno
     setRes(a === v.ja ? 'ok' : toHira(a) === toHira(v.ja) ? 'kata' : 'bad')
   }
   const next = () => res && onAnswer(res === 'ok', took.current)
-  useEffect(() => {
-    if (!res) return
-    const f = (e: KeyboardEvent) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); next() } }
-    addEventListener('keydown', f)
-    return () => removeEventListener('keydown', f)
-  }, [res]) // eslint-disable-line react-hooks/exhaustive-deps
   const how = (
     <div className="kana-how">
-      <div className="muted small">입력 방법 (쿼티 자판)</div>
       <div className="keys">{[...toRomaji(v.ja)].map((k, i) => <kbd key={i}>{k}</kbd>)}</div>
       {kata && <div className="muted small">로마자로 친 뒤 키보드 위 후보에서 가타카나를 골라요 (PC는 F7)</div>}
-      {/[ゃゅょぁぃぅぇぉャュョァィゥェォっッ]/.test(v.ja) && <div className="muted small">작은 글자는 x를 먼저 쳐요 (ゃ = xya, っ = xtu). 받침처럼 겹치는 っ는 다음 자음을 두 번 (がっこう = gakkou)</div>}
+      {/[ゃゅょぁぃぅぇぉャュョァィゥェォっッ]/.test(v.ja) && <div className="muted small">작은 글자는 x를 먼저 (ゃ = xya, っ = xtu). 겹치는 っ는 다음 자음 두 번 (がっこう = gakkou)</div>}
       {/[んン]/.test(v.ja) && <div className="muted small">ん은 n을 두 번 (nn)</div>}
       {/ー/.test(v.ja) && <div className="muted small">길게 늘이는 ー는 빼기(-) 키</div>}
     </div>
   )
-  if (res) {
-    const m = res === 'ok' ? { cls: 'good', mark: '✓', title: '정답이에요!' } : res === 'kata' ? { cls: 'near', mark: '△', title: '아까워요! 가타카나로 바꿔야 해요' } : { cls: 'bad', mark: '✗', title: '틀렸어요' }
-    return (
-      <>
-        <div className={`card verdict ${m.cls}`}><div className="verdict-mark" aria-hidden>{m.mark}</div><div className="result-title">{m.title}</div></div>
-        <div className="card col">
-          {res !== 'ok' && <><div className="muted small">내 입력</div><div className="jp ans">{typed}</div></>}
-          <div className="muted small">정답</div>
-          <div className="jp big-ja">{v.ja} <span className="muted small">{v.ko}</span></div>
-          {how}
-        </div>
-        <div className="grow" />
-        {res !== 'ok' && <button className="btn wide" onClick={() => { setRes(undefined); setTyped(''); shown.current = Date.now() }}>다시 입력</button>}
-        <button className="btn primary wide big" onClick={next}>다음</button>
-      </>
-    )
-  }
+  const m = res === 'ok' ? { cls: 'good', mark: '✓', title: '정답이에요!' } : res === 'kata' ? { cls: 'near', mark: '△', title: '가타카나로 바꿔야 해요' } : { cls: 'bad', mark: '✗', title: '틀렸어요' }
   return (
-    <>
-      <div className="card flash-card">
+    // 버튼을 눌러도 입력칸에서 포커스가 빠지지 않게 (키보드가 내려가지 않음)
+    <div className="kana-wrap" onMouseDown={e => { if (e.target !== inp.current) e.preventDefault() }}>
+      <div className={`card kana-stage ${res ? `verdict ${m.cls}` : ''}`} key={n}>
         <span className="tag info corner">{kata ? '가타카나 입력' : '히라가나 입력'}</span>
         {tag && <span className="tag warn corner-r">{tag}</span>}
-        <div className="jp flash-ja">{v.ja}</div>
-        <button className="icon-btn round" aria-label="발음 듣기" onClick={() => speak(v.reading || v.ja)}>🔊</button>
-        <div className="muted">이 글자를 일본어 키보드로 입력해 보세요</div>
+        {panel === 'setup' ? (
+          <ol className="small kana-setup">
+            <li>갤럭시: 설정 → 일반 → 삼성 키보드 설정 → 언어 및 유형 → 입력 언어 관리 → 日本語 켜기 → <b>쿼티</b></li>
+            <li>Gboard·아이폰: 키보드 설정 → 키보드 추가 → 일본어 → <b>로마자(QWERTY)</b></li>
+            <li>키보드의 🌐 또는 스페이스바를 옆으로 밀어 일본어로 바꿔요</li>
+          </ol>
+        ) : res ? (
+          <>
+            <div className="verdict-inline"><span className="verdict-mark" aria-hidden>{m.mark}</span>{m.title}</div>
+            <div className="jp kana-big sm">{v.ja}</div>
+            <div className="muted small">{v.ko}{res !== 'ok' ? ` · 내 입력: ${typed}` : ''}</div>
+            {how}
+          </>
+        ) : (
+          <>
+            <div className="jp kana-big">{v.ja}</div>
+            <button className="icon-btn round" aria-label="발음 듣기" onClick={() => speak(v.reading || v.ja)}>🔊</button>
+            {panel === 'how' && how}
+          </>
+        )}
       </div>
-      <input className="jp answer-box kana-input" value={typed} lang="ja" enterKeyHint="done" autoFocus placeholder="여기에 입력"
-        onChange={e => setTyped(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); check() } }} />
-      <div className="row">
-        <button className="btn grow" onClick={() => setHint(!hint)}>{hint ? '입력 방법 닫기' : '입력 방법 보기'}</button>
-        <button className="btn grow primary" disabled={!typed.trim()} onClick={check}>확인</button>
+      <div className="kana-row">
+        <input ref={inp} className="jp answer-box kana-input" value={typed} lang="ja" autoFocus autoComplete="off" autoCorrect="off" spellCheck={false}
+          enterKeyHint={res ? 'next' : 'done'} placeholder="여기에 입력"
+          onChange={e => { if (!res) setTyped(e.target.value) }}
+          onBlur={() => requestAnimationFrame(() => inp.current?.focus())}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); if (res) next(); else check() } }} />
+        {res
+          ? <button className="btn primary kana-go" onClick={next}>다음</button>
+          : <button className="btn primary kana-go" disabled={!typed.trim()} onClick={check}>확인</button>}
       </div>
-      {hint && <div className="card">{how}</div>}
-      <details className="more card">
-        <summary>일본어 키보드 설정 방법</summary>
-        <ol className="small">
-          <li>갤럭시(삼성 키보드): 설정 → 일반 → 삼성 키보드 설정 → 언어 및 유형 → 입력 언어 관리 → 日本語 켜기 → 日本語를 눌러 <b>쿼티(QWERTY)</b> 선택</li>
-          <li>Gboard·아이폰: 설정 → 키보드 → 키보드 추가 → 일본어 → <b>로마자(QWERTY)</b></li>
-          <li>입력할 때 키보드의 🌐 또는 스페이스바를 옆으로 밀어 일본어로 바꿔요. 로마자로 치면 히라가나가 나와요</li>
-        </ol>
-      </details>
-    </>
+      <div className="kana-links small">
+        {res && res !== 'ok'
+          ? <button className="link" onClick={() => { setRes(undefined); setTyped(''); shown.current = Date.now() }}>다시 입력</button>
+          : <button className="link" onClick={() => setPanel(panel === 'how' ? undefined : 'how')}>{panel === 'how' ? '입력 방법 닫기' : '입력 방법 보기'}</button>}
+        <button className="link" onClick={() => setPanel(panel === 'setup' ? undefined : 'setup')}>{panel === 'setup' ? '닫기' : '일본어 키보드 설정'}</button>
+      </div>
+    </div>
   )
 }
 
@@ -239,19 +256,116 @@ function DiffView({ g }: { g: Grade }) {
   return <div className="jp diff">{g.diff.map((p, i) => <span key={i} className={`d-${p.t}`}>{p.s}</span>)}</div>
 }
 
-function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }: { s: Sentence; review: boolean; tag?: string; readings: [string, string][]; words?: string[]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
-  const blocks = s.src === 'practice' // 맛보기 연습: 블록을 순서대로 눌러 문장 만들기 (함정 블록 섞음)
+/** 판정 표시 (말해보카식: 정답 / 아까워요 / 오답, 점수 숫자 없음) */
+function verdictOf(g: Grade | null) {
+  const ok = !!g?.ok
+  return ok ? { ok, cls: 'good', mark: '✓', title: g?.kanaOnly ? '정답! 한자로도 써 봐요' : '정답이에요!' }
+    : g && g.score >= 80 ? { ok, cls: 'near', mark: '△', title: '아까워요!' }
+    : { ok, cls: 'bad', mark: '✗', title: g ? '틀렸어요' : '정답을 확인해 봐요' }
+}
+
+/** 예문 직접 쓰기: 키보드가 늘 올라와 있는 화면. 입력칸은 아래에 고정, 문제·채점 결과는 그 위에서 */
+function TypedSentence({ s, n, review: isReview, tag, readings, onDone }: { s: Sentence; n: string; review: boolean; tag?: string; readings: [string, string][]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
+  const [typed, setTyped] = useState('')
+  const [result, setResult] = useState<{ g: Grade | null; answer: string }>()
+  const shown = useRef(Date.now()), took = useRef(0)
+  const inp = useRef<HTMLTextAreaElement>(null)
+  useKeyboardFrame()
+  useEffect(() => { setTyped(''); setResult(undefined); shown.current = Date.now(); inp.current?.focus() }, [n])
+  const ready = !!typed.trim()
+  const submit = (giveUp = false) => {
+    took.current = Date.now() - shown.current
+    setResult({ g: giveUp ? null : grade(typed, s, readings), answer: giveUp ? '' : typed })
+  }
+  const next = () => result && onDone(result.g, result.answer, took.current)
+  /** 내 판단으로 정답 처리: 이 답을 허용 답안으로 저장 (다시 가져와도 유지) */
+  const accept = async () => {
+    if (!result?.g) return
+    await db.sentences.update(s.id, { userAlts: [...(s.userAlts ?? []), result.answer.trim()], edited: true })
+    onDone({ ...result.g, ok: true, score: 100 }, result.answer, took.current)
+  }
+  const g = result?.g ?? null
+  const v = verdictOf(g)
+  const [first, ...rest] = g?.findings ?? []
+  return (
+    // 버튼을 눌러도 입력칸에서 포커스가 빠지지 않게 (키보드가 내려가지 않음)
+    <div className="kana-wrap" onMouseDown={e => { if (e.target !== inp.current) e.preventDefault() }}>
+      <div className={`card type-stage ${result ? `verdict ${v.cls}` : ''}`} key={n + (result ? '-r' : '')}>
+        {!result ? (
+          <>
+            <div className="muted small">{isReview ? (tag ?? '복습할 문장이에요. 다시 써 보세요') : s.given ? '주어진 단어로 문장을 만들어 보세요' : '다음 문장을 일본어로 써 보세요'}</div>
+            {s.given && <div className="jp given"><Ja text={s.given} /></div>}
+            <div className="prompt-ko">{s.ko}</div>
+            {s.hint && <div className="blk-note">{s.hint}</div>}
+          </>
+        ) : (
+          <>
+            <div className="verdict-inline"><span className="verdict-mark" aria-hidden>{v.mark}</span>{v.title}</div>
+            {!v.ok && first && <div className="verdict-why jp">{first.text}</div>}
+            {g && !v.ok && <DiffView g={g} />}
+            <div className="muted small">{s.answerBy === 'teacher' ? '정답 (선생님 작성 · 교재 정답 없음)' : `정답 · p.${s.page}`}</div>
+            {/* 대표 정답 하나만 (여러 개를 보여 주면 헷갈림) */}
+            <div className="jp ans"><Ja text={s.answers[0]} kana={s.kana?.[0]} /></div>
+            <div className="muted small">{s.ko}</div>
+            {g && !v.ok && (
+              <details className="more">
+                <summary>자세히</summary>
+                {rest.length > 0 && <ul className="findings">{rest.map((f, i) => <li key={i} className="jp">{f.text}</li>)}</ul>}
+                <div className="muted small">줄 그은 글자는 잘못 쓴 글자, 파란 글자는 들어가야 할 글자예요. 띄어쓰기와 마침표는 채점에 영향이 없어요.</div>
+              </details>
+            )}
+          </>
+        )}
+      </div>
+      <div className="kana-row">
+        <textarea ref={inp} id="answer" className="jp answer-box type-input" rows={2} value={typed} lang="ja" autoFocus autoComplete="off" autoCorrect="off" spellCheck={false}
+          enterKeyHint={result ? 'next' : 'done'} placeholder="일본어로 입력 (가나만 써도 돼요)"
+          onChange={e => { if (!result) setTyped(e.target.value) }}
+          onBlur={() => requestAnimationFrame(() => inp.current?.focus())}
+          onKeyDown={e => {
+            // 키보드의 확인(엔터) = 채점, 결과에서는 다음. 일본어 변환 중의 엔터는 변환 확정이라 그대로 둔다
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+            e.preventDefault()
+            if (result) next()
+            else if (ready) submit()
+          }} />
+        {result
+          ? <button className="btn primary kana-go" onClick={next}>다음</button>
+          : <button className="btn primary kana-go" disabled={!ready} onClick={() => submit()}>채점</button>}
+      </div>
+      <div className="kana-links small">
+        {!result ? (
+          <>
+            <button className="link" onClick={() => submit(true)}>모르겠어요 · 정답 보기</button>
+            <span className="muted">끝의 。와 공백은 무시해요</span>
+          </>
+        ) : !v.ok ? (
+          <>
+            <button className="link" onClick={() => { setResult(undefined); setTyped(''); shown.current = Date.now() }}>다시 입력</button>
+            {g && <button className="link" onClick={accept}>내 답도 맞아요 · 정답 처리</button>}
+          </>
+        ) : <span />}
+      </div>
+    </div>
+  )
+}
+
+function SentenceCard({ s, n = s.id, review: isReview, tag, readings, words = [], onDone }: { s: Sentence; n?: string; review: boolean; tag?: string; readings: [string, string][]; words?: string[]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
+  if (s.src !== 'practice') return <TypedSentence s={s} n={n} review={isReview} tag={tag} readings={readings} onDone={onDone} />
+  return <BlockSentence s={s} review={isReview} tag={tag} readings={readings} words={words} onDone={onDone} />
+}
+
+/** 맛보기 연습: 블록을 순서대로 눌러 문장 만들기 (함정 블록 섞음) */
+function BlockSentence({ s, review: isReview, tag, readings, words = [], onDone }: { s: Sentence; review: boolean; tag?: string; readings: [string, string][]; words?: string[]; onDone: (g: Grade | null, answer: string, ms: number) => void }) {
   const pieces = useMemo(() => {
-    if (!blocks) return []
     const c = chunks(s.answers[0])
     return shuffle([...c, ...traps(c, words)])
   }, [s.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<number[]>([])
-  const [typed, setTyped] = useState('')
   const [result, setResult] = useState<{ g: Grade | null; answer: string }>()
   const shown = useRef(Date.now())
   const took = useRef(0)
-  useEffect(() => { setTyped(''); setPicked([]); setResult(undefined); shown.current = Date.now() }, [s.id])
+  useEffect(() => { setPicked([]); setResult(undefined); shown.current = Date.now() }, [s.id])
   // 결과 화면에서 엔터 = 다음
   useEffect(() => {
     if (!result) return
@@ -263,30 +377,23 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
     addEventListener('keydown', f)
     return () => removeEventListener('keydown', f)
   }, [result]) // eslint-disable-line react-hooks/exhaustive-deps
-  const text = blocks ? picked.map(k => pieces[k]).join('') : typed
-  const ready = blocks ? picked.length > 0 : !!typed.trim()
+  const text = picked.map(k => pieces[k]).join('')
+  const ready = picked.length > 0
 
   const submit = (giveUp = false) => {
     took.current = Date.now() - shown.current
     setResult({ g: giveUp ? null : grade(text, s, readings), answer: giveUp ? '' : text })
   }
-  /** 내 판단으로 정답 처리: 이 답을 허용 답안으로 저장 (다시 가져와도 유지) */
-  const accept = async () => {
-    if (!result) return
-    await db.sentences.update(s.id, { userAlts: [...(s.userAlts ?? []), result.answer.trim()], edited: true })
-    onDone({ ...result.g!, ok: true, score: 100 }, result.answer, took.current)
-  }
-
   if (!result) {
     return (
       <>
         <div className="card prompt-card">
-          <div className="muted small">{isReview ? (tag ?? '복습할 문장이에요. 다시 써 보세요') : blocks ? '블록을 순서대로 눌러 문장을 만들어 보세요' : s.given ? '주어진 단어로 문장을 만들어 보세요' : '다음 문장을 일본어로 써 보세요'}</div>
+          <div className="muted small">{isReview ? (tag ?? '복습할 문장이에요. 다시 써 보세요') : '블록을 순서대로 눌러 문장을 만들어 보세요'}</div>
           {s.given && <div className="jp given"><Ja text={s.given} /></div>}
           <div className="prompt-ko">{s.ko}</div>
           {s.hint && <div className="blk-note">{s.hint}</div>}
         </div>
-        {blocks ? (
+        {(
           <>
             <div className="block-line jp" aria-label="내 답안">
               {picked.length ? picked.map(k => (
@@ -299,22 +406,9 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
               ))}
             </div>
           </>
-        ) : (
-          <>
-            <label className="muted small" htmlFor="answer">내 답안</label>
-            <textarea id="answer" className="jp answer-box" rows={3} value={typed} lang="ja" enterKeyHint="done"
-              onChange={e => setTyped(e.target.value)} placeholder="일본어로 입력 (가나만 써도 돼요)"
-              onKeyDown={e => {
-                // 키보드의 확인(엔터) = 채점. 일본어 변환 중의 엔터는 변환 확정이라 그대로 둔다
-                if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-                e.preventDefault()
-                if (ready) submit()
-              }} />
-            <div className="muted small">끝의 。와 공백은 채점에서 무시해요</div>
-          </>
         )}
         <div className="grow" />
-        <button className="btn primary wide big" disabled={!ready} onClick={() => submit()}>{blocks ? '확인' : '채점하기'}</button>
+        <button className="btn primary wide big" disabled={!ready} onClick={() => submit()}>확인</button>
         <button className="btn ghost wide" onClick={() => submit(true)}>모르겠어요 · 정답 보기</button>
       </>
     )
@@ -355,8 +449,7 @@ function SentenceCard({ s, review: isReview, tag, readings, words = [], onDone }
         )}
       </div>
       <div className="grow" />
-      {!ok && g && !blocks && <button className="btn wide small-btn" onClick={accept}>내 답도 맞아요 · 정답 처리</button>}
-      {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setTyped(''); setPicked([]); shown.current = Date.now() }}>다시 입력</button>}
+            {!ok && <button className="btn wide" onClick={() => { setResult(undefined); setPicked([]); shown.current = Date.now() }}>다시 입력</button>}
       <button className="btn primary wide big" onClick={() => onDone(g, answer, took.current)}>다음</button>
     </>
   )
@@ -606,15 +699,16 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
 
   let body: JSX.Element
 
+  let typing = false // 가나 직접 입력 화면 (키보드 유지)
   if (st.step === 'vocab' || st.step === 'vocab-review') {
     const v = vocabAll.find(x => x.id === st.queue[st.i])
     const sc = v && vSched?.get(v.id)
     const sch = !sc ? undefined : vocabState(sc) === 'learning' ? '학습 중' : '복습'
     // 준비마당(히라가나·가타카나) 가나 낱말은 직접 입력
     const kanaMode = !!v && /^c-2-/.test(v.unitId.slice(bookId.length + 1)) && /^[ぁ-ゟ゠-ヿー]+$/.test(v.ja)
-    const Card = kanaMode ? KanaCard : VocabCard
-    body = !v ? skip : (
-      <Card key={v.id + st.i} v={v} example={exampleFor(v)} tag={st.step === 'vocab-review' ? sch : undefined} onAnswer={once(async (know: boolean, ms: number) => {
+    typing = kanaMode
+    const onAnswer = once(async (know: boolean, ms: number) => {
+      if (!v) return
         const now = Date.now(), today = dayKey(now)
         const isNew = st.step === 'vocab'
         await db.reviews.add({ itemId: v.id, itemType: 'vocab', unitId: v.unitId, date: today, at: now, phase: phase(), correct: know, grade: know ? 'good' : 'again', responseMs: ms })
@@ -629,8 +723,12 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
         const next = { ...session, stats: { ...session.stats, ...stats }, state: { ...st, dueV, wrongV, queue: dueV, i: 0 } }
         if (dueV.length) await save(next)
         else await goStep('done', next)
-      })} />
-    )
+      })
+    const tag = st.step === 'vocab-review' ? sch : undefined
+    // 가나 입력은 같은 KanaCard를 계속 써서 입력칸(=키보드)을 유지한다
+    body = !v ? skip : kanaMode
+      ? <KanaCard key="kana" n={`${st.step}-${st.i}-${v.id}`} v={v} tag={tag} onAnswer={onAnswer} />
+      : <VocabCard key={v.id + st.i} v={v} example={exampleFor(v)} tag={tag} onAnswer={onAnswer} />
   } else if (st.step === 'vocab-intro') {
     body = <Intro title={`새 단어 ${queueFor('vocab', st).length}개 완료!`} wrong={st.wrongV.length} again={0} due={st.dueV?.length ?? 0}
       items={queueFor('vocab-review', st).map(id => vocabAll.find(v => v.id === id)?.ja ?? '')} onGo={() => goStep('vocab-review')} />
@@ -663,8 +761,9 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
   } else if (st.step === 'sentence' || st.step === 'sentence-review') {
     const s = sentAll.find(x => x.id === st.queue[st.i])
     const isReview = st.step === 'sentence-review'
+    typing = !!s && s.src !== 'practice'
     body = !s ? skip : (
-      <SentenceCard s={s} review={isReview} readings={readings} words={words} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 해 보세요') : undefined}
+      <SentenceCard key={typing ? 'type' : s.id + st.i} n={`${st.step}-${st.i}-${s.id}`} s={s} review={isReview} readings={readings} words={words} tag={isReview ? (dueTag(s.id) === '복습 예정' ? '복습할 때가 된 문장이에요' : dueTag(s.id) === '오답' ? '예전에 틀린 문장이에요' : '아까 틀린 문장이에요. 다시 해 보세요') : undefined}
         onDone={once(async (g: Grade | null, answer: string, ms: number) => {
           const ok = !!g?.ok
           const sg = sentenceGrade(g)
@@ -723,7 +822,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
   return (
     <div className="study">
       <TopBar stage={stage} step={st.step} i={st.i} total={st.queue.length} done={done} review={reviewOnly} onClose={close} />
-      <div className="step-anim" key={`${stage}-${st.step}-${st.i}`}>{body}</div>
+      <div className="step-anim" key={`${stage}-${st.step}-${typing ? 'kana' : st.i}`}>{body}</div>
     </div>
   )
 }

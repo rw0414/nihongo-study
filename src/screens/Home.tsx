@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, getSettings, STAGES, type Chapter, type Session, type Stage } from '../db'
 import { doneDays, minutesByDay } from '../stats'
@@ -166,7 +167,8 @@ export default function Home() {
       <div className="muted small center">스테이지 {clear} / {total} 클리어</div>
 
       {/* 스테이지 시트 */}
-      {selected && (
+      {/* body에 바로 붙인다: 화면 전환 애니메이션(transform) 안에 있으면 fixed가 화면이 아니라 긴 페이지 기준이 되어 시트가 화면 밖으로 나감 */}
+      {selected && createPortal(
         <div className="sheet-back" onClick={() => setSel(undefined)}>
           <div className="sheet" onClick={e => e.stopPropagation()}>
             <div className="sheet-handle" />
@@ -182,7 +184,7 @@ export default function Home() {
             <button className="btn primary wide big" onClick={() => start(selected)}>{selected.open ? '이어서 하기' : selected.done ? '다시 하기' : '▶ 시작하기'}</button>
           </div>
         </div>
-      )}
+      , document.body)}
     </>
   )
 }

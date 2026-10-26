@@ -310,8 +310,8 @@ button.step { width: 100%; border: none; font: inherit; color: inherit; text-ali
 .btn, .chip, .step, .tabbar a { transition: transform .12s ease, background-color .15s; }
 .btn:active:not(:disabled), .chip:active, .step:active, .chip-block:active:not(:disabled) { transform: scale(.96); }
 .stage-bar > div, .bar > div { transition: width .35s ease; }
-.content { animation: vt-in .28s cubic-bezier(.2, .8, .2, 1) both; }
-.study, .reader { animation: vt-in .3s cubic-bezier(.2, .8, .2, 1) both; }
+.content { animation: vt-in .28s cubic-bezier(.2, .8, .2, 1) backwards; } /* backwards: 끝난 뒤 transform을 남기지 않음 (fixed 요소 기준이 바뀌지 않게) */
+.study, .reader { animation: vt-in .3s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes slide-in { from { opacity: 0; transform: translateX(28px); } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } }
 @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.95); } }
@@ -375,3 +375,25 @@ details.more.card ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
 .app { overflow-x: clip; }
 .road-node.has-start { padding-top: 34px; } .road-node.has-start .start-bubble { top: 4px; }
 
+
+/* 가나 직접 입력: 키보드를 뺀 보이는 높이에 맞춰 한 화면에 */
+.study:has(.kana-wrap) { height: var(--vvh, 100dvh); min-height: 0; overflow: hidden; padding-bottom: 8px; }
+.study:has(.kana-wrap) .step-anim { min-height: 0; }
+.kana-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.kana-stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; overflow: auto; text-align: center; padding-top: 40px; animation: card-in .25s ease backwards; }
+.kana-big { font-size: clamp(44px, 14vh, 96px); font-weight: 700; line-height: 1.1; }
+.kana-big.sm { font-size: clamp(32px, 9vh, 64px); }
+.verdict-inline { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
+.verdict-inline .verdict-mark { font-size: 28px; }
+.kana-how { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.kana-setup { text-align: left; margin: 0; padding-left: 20px; line-height: 1.6; }
+.kana-row { display: flex; gap: 8px; }
+.kana-row .kana-input { flex: 1; min-width: 0; height: 52px; font-size: 24px; }
+.kana-go { min-width: 84px; height: 52px; }
+.kana-links { display: flex; justify-content: space-between; }
+
+/* 예문 직접 쓰기: 같은 키보드 화면 (문제·결과는 위에서 스크롤) */
+.type-stage { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; animation: card-in .25s ease backwards; }
+.type-stage .prompt-ko { font-size: clamp(18px, 3.2vh, 24px); }
+.kana-row .type-input { flex: 1; min-width: 0; height: 64px; min-height: 0; font-size: 18px; resize: none; }
+.kana-row:has(.type-input) .kana-go { height: 64px; }
