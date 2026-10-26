@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, getSettings } from '../db'
 import { dayKey, streak } from '../study'
 import { accuracy, avgResponse, bestStreak, doneDays, learnedByDay, leafChaptersDone, minutesByDay, pct, weeklyTrend } from '../stats'
-import { addDays, recovery } from '../srs'
+import { addDays, recovery, reviewExempt } from '../srs'
 import { Ja } from '../Ja'
 
 // 통계 (Phase 5). 그래프는 SVG로 직접 그림. 막대·점을 누르면 값이 보이고, '표로 보기'로 숫자 확인.
@@ -137,7 +137,7 @@ export default function Stats() {
   const learnedTotal = [...learned.values()].reduce((a, b) => a + b, 0)
   const trend = weeklyTrend(reviews, today)
   const prog = leafChaptersDone(chapters, new Set(units.map(u => u.id)))
-  const dueN = sched.filter(s => s.due <= today && s.lastDate !== today).length
+  const dueN = sched.filter(s => !reviewExempt(s) && s.due <= today && s.lastDate !== today).length
   const weakV = sched.filter(s => s.itemType === 'vocab' && recovery(s) === 'weak').sort((a, b) => b.wrongCount - a.wrongCount).slice(0, 3)
   // 취약 문법: 예문 오답을 문법별로
   const gm = new Map<string, number>()

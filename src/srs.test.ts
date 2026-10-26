@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type Sched , ankiAnswer, dueVocab, MIN, fuzz, MISS_LIMIT } from './srs'
+import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type Sched , ankiAnswer, dueVocab, MIN, fuzz, MISS_LIMIT, reviewExempt } from './srs'
 
 const T = '2026-10-21'
 const s0 = newSched('v1', 'vocab', 'b/c-1', T)
@@ -117,5 +117,15 @@ describe('복습 쏠림 줄이기', () => {
     expect(s).toMatchObject({ missToday: MISS_LIMIT, due: '2026-10-23', dueAt: new Date('2026-10-23T00:00:00').getTime() })
     // 다음 날에는 다시 1부터
     expect(ankiAnswer(s, false, new Date('2026-10-23T09:00:00').getTime())).toMatchObject({ missToday: 1 })
+  })
+})
+
+describe('히라가나·가타카나는 복습 제외', () => {
+  it('준비마당 가나 단원 단어는 때가 돼도 복습에 안 나옴', () => {
+    const now = new Date('2026-10-22T09:00:00').getTime()
+    const mk = (id: string, unit: string) => ({ ...newSched(id, 'vocab', `b/${unit}`, '2026-10-20'), reps: 1, left: 0, lastDate: '2026-10-20', due: '2026-10-21' })
+    const all = [mk('b/c-2-1/v01', 'c-2-1'), mk('b/c-2-2/v01', 'c-2-2'), mk('b/c-2-3/v01', 'c-2-3'), mk('b/c-3-1-1/v01', 'c-3-1-1')]
+    expect(dueVocab(all, now)).toEqual(['b/c-2-3/v01', 'b/c-3-1-1/v01'])
+    expect(reviewExempt({ itemType: 'sentence', unitId: 'b/c-2-1' })).toBe(false)
   })
 })

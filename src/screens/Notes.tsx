@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { dayKey } from '../study'
-import { addDays, recovery, type Sched } from '../srs'
+import { addDays, recovery, type Sched, reviewExempt } from '../srs'
 import { go } from '../App'
 import { Ja } from '../Ja'
 
@@ -50,8 +50,8 @@ export default function Notes() {
   const { book, sched, vocab, sents, units, hist } = data
   const wrong = sched.filter(s => s.wrongCount > 0)
   const recoveringN = wrong.filter(s => recovery(s) === 'recovering').length
-  const dueN = sched.filter(s => s.due <= today && s.lastDate !== today).length
-  const weakN = wrong.filter(s => recovery(s) === 'weak' || recovery(s) === 'recovering').length
+  const dueN = sched.filter(s => !reviewExempt(s) && s.due <= today && s.lastDate !== today).length
+  const weakN = wrong.filter(s => !reviewExempt(s) && (recovery(s) === 'weak' || recovery(s) === 'recovering')).length
 
   /** 사용자가 다시 학습 대상으로 지정: 오늘 복습에 나오게 */
   const relearn = (ids: string[]) =>

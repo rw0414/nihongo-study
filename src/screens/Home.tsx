@@ -5,7 +5,7 @@ import { db, getSettings, STAGES, type Chapter, type Session, type Stage } from 
 import { doneDays, minutesByDay } from '../stats'
 import { dayKey, stagePercent, streak } from '../study'
 import { leafChapters } from '../book'
-import { dueAt, vocabState } from '../srs'
+import { dueAt, reviewExempt, vocabState } from '../srs'
 import { go } from '../App'
 import InstallCard from '../InstallCard'
 
@@ -67,7 +67,7 @@ export default function Home() {
     const minutes = minutesByDay(sessions, reviews)
     // 남은 복습: 지금 때가 된 단어 + 오늘 복습할 예문
     const now = Date.now(), t = dayKey()
-    const dueV = sched.filter(x => x.itemType === 'vocab' && vocabState(x) !== 'new' && dueAt(x) <= now).length
+    const dueV = sched.filter(x => x.itemType === 'vocab' && !reviewExempt(x) && vocabState(x) !== 'new' && dueAt(x) <= now).length
     const dueS = sched.filter(x => x.itemType === 'sentence' && x.due <= t && x.lastDate !== t).length
     return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings), dueV, dueS }
   }, [book?.id])
@@ -114,9 +114,11 @@ export default function Home() {
     return parts.map(p => {
       const key = `${c.id}#${p?.id ?? 'all'}`
       const ended = data.sessions.filter(s => s.key === key && s.endedAt)
+      // 진행 중 기록: 마지막 클리어보다 나중에 시작한 것만 (옛 버전이 날마다 새로 만들고 버려 둔 미완료 기록은 무시)
+      const lastEnd = Math.max(0, ...ended.map(s => s.endedAt!))
       const node: Node = {
         key, unitId: c.id, partId: p?.id, title: c.title, partTitle: p?.title, section: top(c).title, locked: !u,
-        done: ended.length > 0, stars: 0, open: data.sessions.filter(s => s.key === key && !s.endedAt && !s.carried).at(-1),
+        done: ended.length > 0, stars: 0, open: data.sessions.filter(s => s.key === key && !s.endedAt && !s.carried && s.startedAt > lastEnd).at(-1),
       }
       // 별 = 끝낸 단계 수 (단어·문법·예문 하나당 1개, 클리어하면 3개)
       // 별 = 지금 끝낸 단계 수 (클리어한 스테이지를 다시 시작하면 다시 하는 진행만큼). ★★★만 클리어(✓)

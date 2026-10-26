@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, getSettings, STAGES, type Cursor, type Review, type Sentence, type Session, type Stage, type Step, type Vocab, type VocabGrade } from '../db'
 import { chunks, dayContent, dayKey, grade, orderSentences, pickSentences, pickVocab, shuffle, traps, type Grade } from '../study'
-import { addDays, ankiAnswer, dueToday, dueVocab, newSched, recovery, relatedPicks, review, sentenceGrade, vocabState, type ErrorType } from '../srs'
+import { addDays, ankiAnswer, reviewExempt, dueToday, dueVocab, newSched, recovery, relatedPicks, review, sentenceGrade, vocabState, type ErrorType } from '../srs'
 import { CardView } from './Unit'
 import { go } from '../App'
 import { Ja } from '../Ja'
@@ -563,7 +563,10 @@ export default function Study({ bookId, cid, partId, stage: want, mode }: { book
       const today = dayKey()
       // 끝내지 않은 스테이지는 날짜가 바뀌어도 이어서 한다. 학습 시간은 날짜별로 쌓이도록 오늘 날짜의 새 기록으로 옮겨 간다
       // (오답만 학습·남은 복습은 그날그날 새로)
-      let s = await db.sessions.where('key').equals(key).filter(x => !x.endedAt && !x.carried && (!reviewOnly || x.date === today)).last()
+      // 마지막으로 클리어한 뒤에 시작한 미완료 기록만 이어서 한다 (그 전의 버려진 기록은 무시)
+      const mine = await db.sessions.where('key').equals(key).toArray()
+      const lastEnd = Math.max(0, ...mine.filter(x => x.endedAt).map(x => x.endedAt!))
+      let s = mine.filter(x => !x.endedAt && !x.carried && x.startedAt > lastEnd && (!reviewOnly || x.date === today)).at(-1)
       if (s && s.date !== today) {
         await db.sessions.update(s.id!, { carried: true })
         const { id: _old, ...rest } = s
@@ -576,7 +579,7 @@ export default function Study({ bookId, cid, partId, stage: want, mode }: { book
         if (reviewOnly) {
           // 아직 회복하지 못한 오답: 틀린 횟수 많은 것부터. 직접 고른 연습이라 오늘 본 것도 포함
           const weak = (t: 'vocab' | 'sentence', n: number) => sched
-            .filter(x => x.itemType === t && (recovery(x) === 'weak' || recovery(x) === 'recovering'))
+            .filter(x => x.itemType === t && !reviewExempt(x) && (recovery(x) === 'weak' || recovery(x) === 'recovering'))
             .sort((a, b) => b.wrongCount - a.wrongCount).slice(0, n).map(x => x.itemId)
           if (due) { // 남은 복습: 지금 때가 된 단어 전부 + 오늘 복습할 예문
             st.dueV = dueVocab(sched, Date.now())
@@ -731,6 +734,11 @@ export default function Study({ bookId, cid, partId, stage: want, mode }: { book
         const isNew = st.step === 'vocab'
         await db.reviews.add({ itemId: v.id, itemType: 'vocab', unitId: v.unitId, date: today, at: now, phase: phase(), correct: know, grade: know ? 'good' : 'again', responseMs: ms })
         if (mode === 'weak') { await advance({}, {}, !know); return } // 오답만 학습은 연습: 일정은 그대로, 모르면 뒤로 다시
+        // 히라가나·가타카나 입력 연습은 복습 일정을 만들지 않는다 (특별 기준: 맞히든 틀리든 복습 제외)
+        if (kanaMode && reviewExempt({ itemType: 'vocab', unitId: v.unitId })) {
+          await advance({}, isNew ? { vocab: session.stats.vocab + 1, vocabOk: session.stats.vocabOk + (know ? 1 : 0) } : {})
+          return
+        }
         const prev = (await db.schedules.get(v.id)) ?? newSched(v.id, 'vocab', v.unitId, today)
         await db.schedules.put(ankiAnswer(prev, know, now))
         const dueV = dueVocab(await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray(), now)

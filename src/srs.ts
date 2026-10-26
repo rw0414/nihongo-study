@@ -172,9 +172,15 @@ export function ankiAnswer(prev: Sched, know: boolean, now: number, rnd = Math.r
   return s
 }
 
+/**
+ * 복습에서 빼는 항목 (특별 기준): 준비마당의 히라가나·가타카나 단원(c-2-1, c-2-2) 글자는
+ * 맞히든 틀리든 복습에 내지 않는다. 그 단원 안의 입력 연습으로만 익힌다.
+ */
+export const reviewExempt = (s: { itemType: string; unitId: string }) => s.itemType === 'vocab' && /\/c-2-[12]$/.test(s.unitId)
+
 /** 지금 복습할 단어: 때가 된 것(오래된 것부터). 없으면 20분 안에 나올 학습 중 단어 */
 export function dueVocab(all: Sched[], now: number, limit = 200): string[] {
-  const vocab = all.filter(s => s.itemType === 'vocab' && vocabState(s) !== 'new')
+  const vocab = all.filter(s => s.itemType === 'vocab' && vocabState(s) !== 'new' && !reviewExempt(s))
   const due = vocab.filter(s => dueAt(s) <= now)
   const pool = due.length ? due : vocab.filter(s => vocabState(s) === 'learning' && dueAt(s) <= now + LEARN_AHEAD)
   return pool.sort((a, b) => dueAt(a) - dueAt(b)).slice(0, limit).map(s => s.itemId)
