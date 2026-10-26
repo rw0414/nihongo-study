@@ -45,7 +45,8 @@ export default function App() {
   // 읽기·학습 화면은 탭 바 없이 전체 화면
   if (screen === 'read' && a) return <Reader bookId={a} page={Number(b) || 1} />
   if (screen === 'study' && a && b) return <Study key={`${b}/${c}/${d}`} bookId={a} cid={b} partId={isStage(c) ? undefined : c} stage={[c, d].find(isStage)} />
-  if (screen === 'review' && a) return <Study key="review" bookId={a} />
+  if (screen === 'review' && a) return <Study key="review" bookId={a} mode="weak" />
+  if (screen === 'due' && a) return <Study key="due" bookId={a} mode="due" />
 
   const page =
     screen === 'library' ? <Library /> :

@@ -5,6 +5,7 @@ import { db, getSettings, STAGES, type Chapter, type Session, type Stage } from 
 import { doneDays, minutesByDay } from '../stats'
 import { dayKey, stagePercent, streak } from '../study'
 import { leafChapters } from '../book'
+import { dueAt, vocabState } from '../srs'
 import { go } from '../App'
 import InstallCard from '../InstallCard'
 
@@ -55,15 +56,20 @@ export default function Home() {
   const book = useLiveQuery(() => db.books.orderBy('lastOpenedAt').reverse().first().then(b => b ?? db.books.toCollection().first()).then(b => b ?? null))
   const data = useLiveQuery(async () => {
     if (!book) return null
-    const [chapters, units, sessions, reviews, settings] = await Promise.all([
+    const [chapters, units, sessions, reviews, sched, settings] = await Promise.all([
       db.chapters.where('[bookId+order]').between([book.id, 0], [book.id, Infinity]).toArray(),
       db.units.where('bookId').equals(book.id).toArray(),
       db.sessions.where('unitId').startsWith(`${book.id}/`).toArray(),
       db.reviews.where('date').equals(dayKey()).toArray(),
+      db.schedules.where('unitId').startsWith(`${book.id}/`).toArray(),
       getSettings(),
     ])
     const minutes = minutesByDay(sessions, reviews)
-    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings) }
+    // 남은 복습: 지금 때가 된 단어 + 오늘 복습할 예문
+    const now = Date.now(), t = dayKey()
+    const dueV = sched.filter(x => x.itemType === 'vocab' && vocabState(x) !== 'new' && dueAt(x) <= now).length
+    const dueS = sched.filter(x => x.itemType === 'sentence' && x.due <= t && x.lastDate !== t).length
+    return { chapters, units: new Map(units.map(u => [u.id, u])), sessions, minutes, goal: settings.goalMinutes, doneSet: doneDays(sessions, minutes, settings), dueV, dueS }
   }, [book?.id])
   const [sel, setSel] = useState<string>()
   const [sheetH, setSheetH] = useState(0)
@@ -110,15 +116,17 @@ export default function Home() {
       const ended = data.sessions.filter(s => s.key === key && s.endedAt)
       const node: Node = {
         key, unitId: c.id, partId: p?.id, title: c.title, partTitle: p?.title, section: top(c).title, locked: !u,
-        done: ended.length > 0, stars: 0, open: data.sessions.find(s => s.key === key && !s.endedAt && s.date === t),
+        done: ended.length > 0, stars: 0, open: data.sessions.filter(s => s.key === key && !s.endedAt && !s.carried).at(-1),
       }
       // 별 = 끝낸 단계 수 (단어·문법·예문 하나당 1개, 클리어하면 3개)
       node.stars = Object.values(percents(node)).filter(x => x >= 100).length
       return node
     })
   })
-  const openNode = nodes.find(n => n.open)
-  const current = openNode ?? nodes.find(n => !n.done && !n.locked)
+  // 진행 중 = 가장 최근에 공부한 스테이지. 그 스테이지를 클리어했으면 진행 중 표시 없음
+  const last = data.sessions.filter(s => !s.carried && s.key.includes('#') && !/^(review|due)#/.test(s.key))
+    .sort((a, b) => (a.updatedAt ?? a.endedAt ?? a.startedAt) - (b.updatedAt ?? b.endedAt ?? b.startedAt)).at(-1)
+  const current = last && !last.endedAt ? nodes.find(n => n.key === last.key) : undefined
   const selected = nodes.find(n => n.key === sel)
   const start = (n: Node, s?: Stage) => go(`/study/${book.id}/${n.unitId.slice(book.id.length + 1)}${n.partId ? `/${n.partId}` : ''}${s ? `/${s}` : ''}`)
 
@@ -139,6 +147,16 @@ export default function Home() {
         <span className="muted small">{clear} / {total} 클리어</span>
       </div>
       <InstallCard />
+      {data.dueV + data.dueS > 0 && (
+        <button className="card due-card" onClick={() => go(`/due/${book.id}`)}>
+          <span className="due-icon" aria-hidden>🔁</span>
+          <span className="grow">
+            <b>남은 복습</b>
+            <span className="muted small"> 단어 {data.dueV} · 예문 {data.dueS}</span>
+          </span>
+          <span className="accent-text small"><b>복습만 하기 ›</b></span>
+        </button>
+      )}
 
       {/* 로드맵 */}
       <div className="legend small muted"><span><i className="dot done" />클리어</span><span><i className="dot now" />진행 중</span><span><i className="dot" />앞으로</span><span>🔒 준비 중</span><span className="stars">★</span><span>= 끝낸 단계</span></div>

@@ -27,6 +27,15 @@ export interface Sched {
   dueAt?: number
   left?: number
   steps?: number
+  missDate?: string // 오늘 '모름'을 누른 횟수를 세는 날짜
+  missToday?: number
+}
+
+/** 복습 간격 흩뿌리기: ±10% (최소 ±1일). 같은 날 배운 것들이 같은 날 한꺼번에 몰리지 않게. 3일 미만은 그대로 */
+export function fuzz(days: number, rnd = Math.random): number {
+  if (days < 3) return days
+  const span = Math.max(1, Math.round(days * 0.1))
+  return Math.max(1, days + Math.round((rnd() * 2 - 1) * span))
 }
 
 export const addDays = (day: string, n: number) => {
@@ -41,7 +50,7 @@ export const newSched = (itemId: string, itemType: Sched['itemType'], unitId: st
 
 /** 답 하나를 반영한 다음 일정. 오늘 이미 반영했으면 그대로 돌려준다.
  *  ok: 오답 집계 기준 (단어는 '다시'만 오답, 예문은 채점이 틀리면 '어려움'이어도 오답) */
-export function review(prev: Sched, g: VocabGrade, today: string, error?: ErrorType, ok = g !== 'again'): Sched {
+export function review(prev: Sched, g: VocabGrade, today: string, error?: ErrorType, ok = g !== 'again', rnd = Math.random): Sched {
   if (prev.lastDate === today) return prev
   const s = { ...prev, errors: { ...prev.errors } }
   if (g === 'again') {
@@ -56,7 +65,7 @@ export function review(prev: Sched, g: VocabGrade, today: string, error?: ErrorT
   } else {
     s.reps++
     const easy = g === 'easy'
-    s.interval = s.reps === 1 ? (easy ? 3 : 1) : s.reps === 2 ? (easy ? 6 : 3) : Math.round(s.interval * s.ease * (easy ? 1.3 : 1))
+    s.interval = fuzz(s.reps === 1 ? (easy ? 3 : 1) : s.reps === 2 ? (easy ? 6 : 3) : Math.round(s.interval * s.ease * (easy ? 1.3 : 1)), rnd)
     if (easy) s.ease += 0.15
   }
   s.wrongCount += ok ? 0 : 1
@@ -127,7 +136,10 @@ export function vocabState(s: Sched | undefined): 'new' | 'learning' | 'review' 
 export const dueAt = (s: Sched) => s.dueAt ?? dayStart(s.due)
 
 /** 단어 답 하나 → 다음 일정 */
-export function ankiAnswer(prev: Sched, know: boolean, now: number): Sched {
+/** 같은 날 '모름'을 이만큼 누르면 그날은 그만 내고 내일 맨 먼저 */
+export const MISS_LIMIT = 4
+
+export function ankiAnswer(prev: Sched, know: boolean, now: number, rnd = Math.random): Sched {
   const t = today(now)
   const first = prev.lastDate !== t // 오답 노트 통계는 그날 첫 답으로
   const s: Sched = {
@@ -135,11 +147,17 @@ export function ankiAnswer(prev: Sched, know: boolean, now: number): Sched {
     wrongCount: prev.wrongCount + (first && !know ? 1 : 0), correctCount: prev.correctCount + (first && know ? 1 : 0),
     streak: first ? (know ? prev.streak + 1 : 0) : prev.streak,
   }
-  const at = (ms: number) => { s.dueAt = now + ms; s.due = today(s.dueAt) }
+  const at = (ms: number) => {
+    // 오늘 '모름'이 많으면 그만: 내일 0시에 (내일 복습 중 가장 먼저)
+    if (!know && (s.missToday ?? 0) >= MISS_LIMIT) { s.due = addDays(t, 1); s.dueAt = dayStart(s.due); return }
+    s.dueAt = now + ms
+    s.due = today(s.dueAt)
+  }
+  if (!know) { s.missToday = (prev.missDate === t ? prev.missToday ?? 0 : 0) + 1; s.missDate = t }
   const graduate = (days: number) => { s.left = 0; s.interval = days; s.due = addDays(t, days); s.dueAt = dayStart(s.due) }
   const state = vocabState(prev)
   if (state === 'review') {
-    if (know) { s.reps = prev.reps + 1; graduate(Math.max(prev.interval + 1, Math.round(prev.interval * prev.ease))) }
+    if (know) { s.reps = prev.reps + 1; graduate(fuzz(Math.max(prev.interval + 1, Math.round(prev.interval * prev.ease)), rnd)) }
     else { s.lapses = prev.lapses + 1; s.ease = Math.max(1.3, prev.ease - 0.2); s.reps = 0; s.interval = 1; s.steps = RELEARN_STEPS.length; s.left = RELEARN_STEPS.length; at(RELEARN_STEPS[0] * MIN) }
     return s
   }

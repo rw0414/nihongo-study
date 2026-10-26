@@ -402,3 +402,6 @@ details.more.card ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
 .home-top { display: flex; align-items: center; gap: 10px; }
 .stage.sel { outline: 4px solid var(--accent); outline-offset: 4px; }
 .sheet-back { background: rgba(0, 0, 0, .18); }
+
+.due-card { display: flex; align-items: center; gap: 10px; width: 100%; border: 1.5px solid var(--accent); font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.due-icon { font-size: 20px; }

@@ -102,9 +102,11 @@ export interface Session {
   // wrongV/S = 오늘 틀린 것, dueV/S = 복습할 때가 된 것 (시작할 때 정해 둠)
   // step/queue/i = 지금 보고 있는 단계의 위치 (옛 기록 호환), pos = 단계별 위치, newV = 이번에 처음 배우는 단어
   // 단어 dueV는 안키식 시간 일정으로 그때그때 다시 계산한다
-  state: { step: Step; queue: string[]; i: number; stage?: Stage; pos?: Partial<Record<Stage, Cursor>>; newV?: string[]; wrongV: string[]; wrongS: string[]; dueV?: string[]; dueS?: string[]; tries: Record<string, number> }
+  state: { step: Step; queue: string[]; i: number; stage?: Stage; pos?: Partial<Record<Stage, Cursor>>; newV?: string[]; revN?: number; wrongV: string[]; wrongS: string[]; dueV?: string[]; dueS?: string[]; tries: Record<string, number> }
   stats: { vocab: number; vocabOk: number; sentences: number; sentencesOk: number; cards: number }
   activeMs?: number // 실제로 학습한 시간 (화면이 켜져 있고 1분 안에 조작한 시간만)
+  updatedAt?: number // 마지막으로 공부한 시각 (홈의 '진행 중' 스테이지)
+  carried?: boolean // 날짜가 바뀌어 오늘 기록으로 옮겨 간 세션 (진행은 새 세션에서 이어짐)
 }
 
 class StudyDB extends Dexie {
@@ -167,8 +169,9 @@ export interface UserSettings {
   goalMinutes: number // 하루 학습 목표(분)
   streakRule: 'routine' | 'minutes' // 연속 학습으로 인정하는 기준: 루틴 1회 완료 / 목표 시간 달성
   furigana: boolean // 모든 한자에 후리가나
+  stageReviews: number // 스테이지 안에서 하는 단어 복습 최대 개수 (나머지는 홈의 '복습만 하기')
 }
-export const DEFAULT_SETTINGS: UserSettings = { goalMinutes: 15, streakRule: 'routine', furigana: true }
+export const DEFAULT_SETTINGS: UserSettings = { goalMinutes: 15, streakRule: 'routine', furigana: true, stageReviews: 20 }
 
 export async function getSettings(): Promise<UserSettings> {
   const rows = await db.settings.toArray()

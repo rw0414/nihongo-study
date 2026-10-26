@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type Sched , ankiAnswer, dueVocab, MIN } from './srs'
+import { addDays, dueToday, newSched, recovery, relatedPicks, review, sentenceGrade, type Sched , ankiAnswer, dueVocab, MIN, fuzz, MISS_LIMIT } from './srs'
 
 const T = '2026-10-21'
 const s0 = newSched('v1', 'vocab', 'b/c-1', T)
@@ -10,11 +10,11 @@ describe('간격 반복', () => {
     expect(addDays('2028-02-28', 1)).toBe('2028-02-29')
   })
   it('계속 맞히면 간격이 1일 → 3일 → 7~8일로 늘어남', () => {
-    const a = review(s0, 'good', T)
+    const a = review(s0, 'good', T, undefined, true, () => 0.5)
     expect([a.interval, a.due]).toEqual([1, '2026-10-22'])
-    const b = review(a, 'good', a.due)
+    const b = review(a, 'good', a.due, undefined, true, () => 0.5)
     expect(b.interval).toBe(3)
-    const c = review(b, 'good', b.due)
+    const c = review(b, 'good', b.due, undefined, true, () => 0.5)
     expect(c.interval).toBe(8) // 3 × 2.5
   })
   it('틀리면 내일 다시, 간격 초기화, 쉬움 정도 하락', () => {
@@ -23,7 +23,7 @@ describe('간격 반복', () => {
     expect([w.interval, w.due, w.reps, w.lapses, w.wrongCount, w.streak]).toEqual([1, '2026-10-26', 0, 1, 1, 0])
     expect(w.ease).toBeCloseTo(2.3)
   })
-  it('쉬움은 더 길게', () => expect(review(s0, 'easy', T).interval).toBe(3))
+  it('쉬움은 더 길게', () => expect(review(s0, 'easy', T, undefined, true, () => 0.5).interval).toBe(3))
   it('같은 날 두 번째 답은 일정을 바꾸지 않음 (같은 날 재노출 ≠ 다음 날 복습)', () => {
     const a = review(s0, 'again', T)
     expect(review(a, 'good', T)).toBe(a)
@@ -81,7 +81,7 @@ describe('단어 안키 주기 (시간)', () => {
     expect(b).toMatchObject({ left: 1, dueAt: now + MIN + 10 * MIN })
   })
   it('복습: 알고 있음 → 간격 × 2.5', () => {
-    const r = ankiAnswer({ ...fresh, reps: 2, interval: 4, left: 0, lastDate: '2026-10-18', due: '2026-10-22' }, true, now)
+    const r = ankiAnswer({ ...fresh, reps: 2, interval: 4, left: 0, lastDate: '2026-10-18', due: '2026-10-22' }, true, now, () => 0.5)
     expect(r).toMatchObject({ interval: 10, due: '2026-11-01', reps: 3 })
   })
   it('복습: 모름 → ease −0.2, 10분 뒤 다시 학습 → 1일 뒤', () => {
@@ -97,5 +97,25 @@ describe('단어 안키 주기 (시간)', () => {
     const due = { ...fresh, itemId: 'c', reps: 1, left: 0, lastDate: '2026-10-20', due: '2026-10-22' }
     expect(dueVocab([learning, later, due], now)).toEqual(['c'])
     expect(dueVocab([{ ...learning, dueAt: now + 30 * MIN }], now)).toEqual([])
+  })
+})
+
+describe('복습 쏠림 줄이기', () => {
+  const now = new Date('2026-10-22T09:00:00').getTime()
+  const fresh = newSched('v1', 'vocab', 'u', '2026-10-22')
+  it('간격 흩뿌리기 ±10% (3일 미만은 그대로)', () => {
+    expect(fuzz(2, () => 0)).toBe(2)
+    expect(fuzz(10, () => 0)).toBe(9)
+    expect(fuzz(10, () => 0.999)).toBe(11)
+    expect(fuzz(30, () => 0.5)).toBe(30)
+  })
+  it('같은 날 모름 4번이면 그날은 그만, 내일 0시에', () => {
+    let s = fresh
+    for (let k = 0; k < MISS_LIMIT - 1; k++) s = ankiAnswer(s, false, now + k * MIN)
+    expect(s.dueAt).toBe(now + (MISS_LIMIT - 2) * MIN + MIN)
+    s = ankiAnswer(s, false, now + 10 * MIN)
+    expect(s).toMatchObject({ missToday: MISS_LIMIT, due: '2026-10-23', dueAt: new Date('2026-10-23T00:00:00').getTime() })
+    // 다음 날에는 다시 1부터
+    expect(ankiAnswer(s, false, new Date('2026-10-23T09:00:00').getTime())).toMatchObject({ missToday: 1 })
   })
 })

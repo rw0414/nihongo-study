@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, STAGES, type Cursor, type Review, type Sentence, type Session, type Stage, type Step, type Vocab, type VocabGrade } from '../db'
+import { db, getSettings, STAGES, type Cursor, type Review, type Sentence, type Session, type Stage, type Step, type Vocab, type VocabGrade } from '../db'
 import { chunks, dayContent, dayKey, grade, orderSentences, pickSentences, pickVocab, shuffle, traps, type Grade } from '../study'
 import { addDays, ankiAnswer, dueToday, dueVocab, newSched, recovery, relatedPicks, review, sentenceGrade, vocabState, type ErrorType } from '../srs'
 import { CardView } from './Unit'
@@ -52,7 +52,7 @@ function useActiveTime(id: number | undefined, initial: number) {
   return ms
 }
 
-function TopBar({ stage, step, i, total, done, review, onClose }: { stage: Stage; step: Step; i: number; total: number; done: Set<Stage>; review?: boolean; onClose: () => void }) {
+function TopBar({ stage, step, i, total, done, review, onClose }: { stage: Stage; step: Step; i: number; total: number; done: Set<Stage>; review?: string; onClose: () => void }) {
   const frac = total ? Math.min(i / total, 1) : 0
   return (
     <>
@@ -67,7 +67,7 @@ function TopBar({ stage, step, i, total, done, review, onClose }: { stage: Stage
       </div>
       {step !== 'done' && (
         <div className="row small">
-          <b className="accent-text">{review ? (stage === 'vocab' ? '오답 노트 · 단어' : '오답 노트 · 예문') : `${STAGES.indexOf(stage) + 1}단계 · ${LABEL[stage]}`}</b>
+          <b className="accent-text">{review ? `${review} · ${stage === 'vocab' ? '단어' : '예문'}` : `${STAGES.indexOf(stage) + 1}단계 · ${LABEL[stage]}`}</b>
           <span className="grow" />
           {step.endsWith('review') && !review && <span className="tag warn">복습</span>}
         </div>
@@ -481,10 +481,13 @@ function Intro({ title, wrong, again, due, items, onGo }: { title: string; wrong
   )
 }
 
-export default function Study({ bookId, cid, partId, stage: want }: { bookId: string; cid?: string; partId?: string; stage?: Stage }) {
-  const reviewOnly = !cid // 오답만 학습
-  const unitId = reviewOnly ? `${bookId}/review` : `${bookId}/${cid}`
-  const key = reviewOnly ? `review#${bookId}` : `${unitId}#${partId ?? 'all'}`
+export default function Study({ bookId, cid, partId, stage: want, mode }: { bookId: string; cid?: string; partId?: string; stage?: Stage; mode?: 'weak' | 'due' }) {
+  const reviewOnly = !cid // 오답만 학습(weak) 또는 남은 복습만(due)
+  const due = mode === 'due'
+  const unitId = reviewOnly ? `${bookId}/${due ? 'due' : 'review'}` : `${bookId}/${cid}`
+  const key = reviewOnly ? `${due ? 'due' : 'review'}#${bookId}` : `${unitId}#${partId ?? 'all'}`
+  const settings = useLiveQuery(getSettings)
+  const cap = due ? Infinity : settings?.stageReviews ?? 20 // 스테이지 안 단어 복습 최대 개수 (B)
   const book = useLiveQuery(() => db.books.get(bookId), [bookId])
   const units = useLiveQuery(async () => new Map((await db.units.where('bookId').equals(bookId).toArray()).map(u => [u.id, u])), [bookId])
   // 복습 항목은 다른 단원에서도 오므로 교재 전체를 불러 둔다
@@ -504,7 +507,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
   }, [vocabAll])
 
   const unit = units?.get(unitId)
-  const ready = book && units && vocabAll && sentAll && (reviewOnly || unit)
+  const ready = book && units && vocabAll && sentAll && settings && (reviewOnly || unit)
   const day = unit ? dayContent(unit.data, partId) : undefined
   const parts = unit?.data.parts
   const isLast = !parts || parts.at(-1)?.id === partId
@@ -524,7 +527,7 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
 
   const queueFor = (step: Step, st: Session['state']) =>
     step === 'vocab' ? st.newV ?? V.map(v => v.id) :
-    step === 'vocab-review' ? st.dueV ?? [] :
+    step === 'vocab-review' ? (st.dueV ?? []).slice(0, Math.max(0, cap - (st.revN ?? 0))) :
     step === 'grammar' ? grammarItems :
     step === 'sentence' ? S.map(s => s.id) :
     step === 'sentence-review' ? [...st.wrongS, ...(st.dueS ?? [])] : []
@@ -558,7 +561,15 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
     if (!ready || session) return
     ;(async () => {
       const today = dayKey()
-      let s = await db.sessions.where('key').equals(key).filter(x => !x.endedAt && x.date === today).last()
+      // 끝내지 않은 스테이지는 날짜가 바뀌어도 이어서 한다. 학습 시간은 날짜별로 쌓이도록 오늘 날짜의 새 기록으로 옮겨 간다
+      // (오답만 학습·남은 복습은 그날그날 새로)
+      let s = await db.sessions.where('key').equals(key).filter(x => !x.endedAt && !x.carried && (!reviewOnly || x.date === today)).last()
+      if (s && s.date !== today) {
+        await db.sessions.update(s.id!, { carried: true })
+        const { id: _old, ...rest } = s
+        s = { ...rest, date: today, startedAt: Date.now(), activeMs: 0, updatedAt: Date.now(), state: { ...rest.state, revN: 0 } } // 복습 개수는 날마다 새로
+        s.id = await db.sessions.add(s)
+      }
       if (!s) {
         const sched = await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray()
         const st: Session['state'] = { step: 'vocab', queue: [], i: 0, pos: {}, wrongV: [], wrongS: [], tries: {} }
@@ -567,8 +578,13 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
           const weak = (t: 'vocab' | 'sentence', n: number) => sched
             .filter(x => x.itemType === t && (recovery(x) === 'weak' || recovery(x) === 'recovering'))
             .sort((a, b) => b.wrongCount - a.wrongCount).slice(0, n).map(x => x.itemId)
-          st.dueV = weak('vocab', 30)
-          st.dueS = weak('sentence', 15)
+          if (due) { // 남은 복습: 지금 때가 된 단어 전부 + 오늘 복습할 예문
+            st.dueV = dueVocab(sched, Date.now())
+            st.dueS = dueToday(sched, today, 'sentence', new Set(), 50)
+          } else {
+            st.dueV = weak('vocab', 30)
+            st.dueS = weak('sentence', 15)
+          }
           if (!st.dueV.length && !st.dueS.length) { setNothing(true); return } // 빈 복습은 기록하지 않음
         } else {
           // 새 단어 = 아직 한 번도 안 본 단어 (지난 단원을 다시 해도 이미 배운 단어는 시간에 맞춰 복습에서만)
@@ -585,10 +601,11 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
       }
       let st = s.state
       // 단어 복습은 지금 시각 기준으로 다시 계산 (오답만 학습은 고른 목록 그대로)
-      if (!reviewOnly) {
+      if (mode !== 'weak') {
         st = { ...st, dueV: dueVocab(await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray(), Date.now()) }
-        if (st.step === 'vocab-review') st = { ...st, queue: st.dueV!, i: 0 }
-        if (st.pos?.vocab?.step === 'vocab-review') st = { ...st, pos: { ...st.pos, vocab: { step: 'vocab-review', queue: st.dueV!, i: 0 } } }
+        const q = queueFor('vocab-review', st)
+        if (st.step === 'vocab-review') st = { ...st, queue: q, i: 0 }
+        if (st.pos?.vocab?.step === 'vocab-review') st = { ...st, pos: { ...st.pos, vocab: { step: 'vocab-review', queue: q, i: 0 } } }
       }
       if (!st.pos) { // 옛 기록: 지금 단계 앞은 끝난 것으로
         const cur = stageOf(st.step), pos: Session['state']['pos'] = {}
@@ -616,19 +633,19 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
     return (
       <div className="study">
         <div className="intro-check">✓</div>
-        <div className="intro-title">복습할 오답이 없어요</div>
-        <div className="muted center">틀린 것을 모두 회복했어요. 정말 잘하고 있어요!</div>
+        <div className="intro-title">{due ? '지금 복습할 게 없어요' : '복습할 오답이 없어요'}</div>
+        <div className="muted center">{due ? '복습할 때가 되면 홈에 남은 복습이 나타나요.' : '틀린 것을 모두 회복했어요. 정말 잘하고 있어요!'}</div>
         <div className="grow" />
-        <button className="btn primary wide big" onClick={() => go('/notes')}>오답 노트로</button>
+        <button className="btn primary wide big" onClick={() => go(due ? '/' : '/notes')}>{due ? '홈으로' : '오답 노트로'}</button>
       </div>
     )
   }
   if (!ready || !session || !st) return null
   const stage = st.stage ?? stageOf(st.step)
-  const close = () => go(reviewOnly ? '/notes' : '/')
+  const close = () => go(mode === 'weak' ? '/notes' : '/')
 
   async function save(next: Session) {
-    next = { ...next, activeMs: active.current, state: { ...next.state, pos: { ...next.state.pos, [next.state.stage ?? stage]: { step: next.state.step, queue: next.state.queue, i: next.state.i } } } }
+    next = { ...next, activeMs: active.current, updatedAt: Date.now(), state: { ...next.state, pos: { ...next.state.pos, [next.state.stage ?? stage]: { step: next.state.step, queue: next.state.queue, i: next.state.i } } } }
     setSession(next)
     await db.sessions.put(next)
     busy.current = false
@@ -713,16 +730,18 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
         const now = Date.now(), today = dayKey(now)
         const isNew = st.step === 'vocab'
         await db.reviews.add({ itemId: v.id, itemType: 'vocab', unitId: v.unitId, date: today, at: now, phase: phase(), correct: know, grade: know ? 'good' : 'again', responseMs: ms })
-        if (reviewOnly) { await advance({}, {}, !know); return } // 오답만 학습은 연습: 일정은 그대로, 모르면 뒤로 다시
+        if (mode === 'weak') { await advance({}, {}, !know); return } // 오답만 학습은 연습: 일정은 그대로, 모르면 뒤로 다시
         const prev = (await db.schedules.get(v.id)) ?? newSched(v.id, 'vocab', v.unitId, today)
         await db.schedules.put(ankiAnswer(prev, know, now))
         const dueV = dueVocab(await db.schedules.where('unitId').startsWith(`${bookId}/`).toArray(), now)
         const wrongV = isNew && !know && !st.wrongV.includes(v.id) ? [...st.wrongV, v.id] : st.wrongV
         const stats = isNew ? { vocab: session.stats.vocab + 1, vocabOk: session.stats.vocabOk + (know ? 1 : 0) } : {}
         if (isNew) { await advance({ dueV, wrongV }, stats); return }
-        // 복습: 매번 지금 시각 기준으로 다음 단어를 고른다. 나올 단어가 없으면 단계 끝
-        const next = { ...session, stats: { ...session.stats, ...stats }, state: { ...st, dueV, wrongV, queue: dueV, i: 0 } }
-        if (dueV.length) await save(next)
+        // 복습: 매번 지금 시각 기준으로 다음 단어를 고른다. 스테이지 안에서는 설정한 개수까지만 (나머지는 홈의 '복습만 하기')
+        const nst = { ...st, dueV, wrongV, revN: (st.revN ?? 0) + 1, i: 0 }
+        nst.queue = queueFor('vocab-review', nst)
+        const next = { ...session, stats: { ...session.stats, ...stats }, state: nst }
+        if (nst.queue.length) await save(next)
         else await goStep('done', next)
       })
     const tag = st.step === 'vocab-review' ? sch : undefined
@@ -801,9 +820,9 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
     body = (
       <>
         <div className="intro-check">✓</div>
-        <div className="intro-title">{reviewOnly ? '오답 복습 완료!' : '오늘 학습 완료!'}</div>
+        <div className="intro-title">{due ? '복습 완료!' : reviewOnly ? '오답 복습 완료!' : '오늘 학습 완료!'}</div>
         <div className="muted center">
-          {reviewOnly ? '오답 노트' : `${unit?.data.title}${day?.title ? ` ${day.title}` : ''}`} · 실제 학습 {Math.max(1, Math.round(active.current / 60000))}분
+          {due ? '남은 복습' : reviewOnly ? '오답 노트' : `${unit?.data.title}${day?.title ? ` ${day.title}` : ''}`} · 실제 학습 {Math.max(1, Math.round(active.current / 60000))}분
         </div>
         <div className="card list-card">
           {!reviewOnly && <div className="item-row"><div className="grow"><b>1 단어 암기</b><div className="muted small">새 단어 {vocab}{rv ? ` · 곧 다시 나올 단어 ${rv}` : ''}</div></div><b className="accent-text">{pct(vocabOk, vocab)}</b></div>}
@@ -822,7 +841,8 @@ export default function Study({ bookId, cid, partId, stage: want }: { bookId: st
 
   return (
     <div className="study">
-      <TopBar stage={stage} step={st.step} i={st.i} total={st.queue.length} done={done} review={reviewOnly} onClose={close} />
+      <TopBar stage={stage} step={st.step} done={done} review={reviewOnly ? (due ? '남은 복습' : '오답 노트') : undefined} onClose={close}
+        {...(st.step === 'vocab-review' ? { i: st.revN ?? 0, total: (st.revN ?? 0) + st.queue.length } : { i: st.i, total: st.queue.length })} />
       <div className="step-anim" key={`${stage}-${st.step}-${typing ? 'kana' : st.i}`}>{body}</div>
     </div>
   )

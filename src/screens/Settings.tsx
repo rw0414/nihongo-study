@@ -126,6 +126,13 @@ function GoalCard() {
           {[5, 10, 15, 20, 30, 45, 60].map(m => <option key={m} value={m}>{m}분</option>)}
         </select>
       </label>
+      <label className="row small">
+        <span className="grow">스테이지 안에서 하는 단어 복습</span>
+        <select value={st.stageReviews} onChange={e => setSetting('stageReviews', Number(e.target.value))}>
+          {[10, 20, 30, 50, 100].map(n => <option key={n} value={n}>{n}개까지</option>)}
+        </select>
+      </label>
+      <p className="muted small" style={{ margin: 0 }}>남은 복습은 홈의 '복습만 하기'에서 이어서 할 수 있어요.</p>
       <div className="small">연속 학습으로 인정하는 기준</div>
       <div className="seg" style={{ marginTop: 0 }}>
         <button className={st.streakRule === 'routine' ? 'on' : ''} onClick={() => setSetting('streakRule', 'routine')}>루틴 1회 완료</button>
