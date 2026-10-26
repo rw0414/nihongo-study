@@ -119,6 +119,7 @@ export default function Home() {
         done: ended.length > 0, stars: 0, open: data.sessions.filter(s => s.key === key && !s.endedAt && !s.carried).at(-1),
       }
       // 별 = 끝낸 단계 수 (단어·문법·예문 하나당 1개, 클리어하면 3개)
+      // 별 = 지금 끝낸 단계 수 (클리어한 스테이지를 다시 시작하면 다시 하는 진행만큼). ★★★만 클리어(✓)
       node.stars = Object.values(percents(node)).filter(x => x >= 100).length
       return node
     })
@@ -132,7 +133,7 @@ export default function Home() {
 
   const days = streak(data.doneSet)
   const todayMin = Math.round(data.minutes.get(t) ?? 0)
-  const clear = nodes.filter(n => n.done).length, total = nodes.filter(n => !n.locked).length
+  const clear = nodes.filter(n => n.stars === 3).length, total = nodes.filter(n => !n.locked).length
   const starRow = (n: Node) => <div className="stars">{'★'.repeat(n.stars)}<span className="off">{'★'.repeat(3 - n.stars)}</span></div>
 
   let lastSection = ''
@@ -159,7 +160,7 @@ export default function Home() {
       )}
 
       {/* 로드맵 */}
-      <div className="legend small muted"><span><i className="dot done" />클리어</span><span><i className="dot now" />진행 중</span><span><i className="dot" />앞으로</span><span>🔒 준비 중</span><span className="stars">★</span><span>= 끝낸 단계</span></div>
+      <div className="legend small muted"><span><i className="dot done" />클리어 ★★★</span><span><i className="dot prog" />진행 중 ★~★★</span><span><i className="dot" />시작 전</span><span>🔒 준비 중</span><span className="stars">★</span><span>= 끝낸 단계</span></div>
       <div className="road">
         {nodes.map(n => {
           const head = n.section !== lastSection ? (lastSection = n.section) : null
@@ -170,11 +171,11 @@ export default function Home() {
               {head && <div className="road-section">{head}</div>}
               <div className={`road-node ${isNow ? "has-start" : ""}`} style={{ transform: `translateX(${x}px)` }} ref={isNow ? curRef : undefined} data-stage={n.key}>
                 {isNow && <div className="start-bubble">진행 중</div>}
-                <button className={`stage ${n.done ? 'done' : ''} ${isNow ? 'now' : ''} ${n.locked ? 'locked' : ''} ${n.key === sel ? 'sel' : ''}`} disabled={n.locked}
-                  aria-label={`${n.title}${n.partTitle ?? ''}${n.done ? ' 클리어' : ''}`} onClick={() => setSel(n.key)}>
-                  {n.locked ? '🔒' : n.done ? '✓' : nodes.indexOf(n) + 1}
+                <button className={`stage ${n.stars === 3 ? 'done' : n.stars > 0 ? 'prog' : ''} ${isNow ? 'now' : ''} ${n.locked ? 'locked' : ''} ${n.key === sel ? 'sel' : ''}`} disabled={n.locked}
+                  aria-label={`${n.title}${n.partTitle ?? ''}${n.stars === 3 ? ' 클리어' : n.stars > 0 ? ' 진행 중' : ''}`} onClick={() => setSel(n.key)}>
+                  {n.locked ? '🔒' : n.stars === 3 ? '✓' : nodes.indexOf(n) + 1}
                 </button>
-                {(n.done || isNow || n.stars > 0) && starRow(n)}
+                {(isNow || n.stars > 0) && starRow(n)}
                 <div className="road-label">{n.title.replace(/^\d+\s*/, '')}{n.partTitle ? ` ${n.partTitle}` : ''}</div>
               </div>
             </div>
