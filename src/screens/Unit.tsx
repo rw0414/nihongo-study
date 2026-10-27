@@ -18,12 +18,13 @@ const ORIGIN = {
 
 const SRC = { example: '교재 예문', practice: '맛보기 연습', drill: '실력 다지기' }
 
-function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence> }): JSX.Element | null {
+function BlockView({ b, sentences, study }: { b: Block; sentences: Map<string, Sentence>; study?: boolean }): JSX.Element | null {
   switch (b.t) {
     case 'p': return <p className="blk-p"><Ja text={b.text} /></p>
     case 'h': return <div className="blk-h"><Ja text={b.text} /></div>
     case 'note': return <div className="blk-note"><Ja text={b.text} /></div>
-    case 'teacher': return <div className="blk-teacher"><span className="tag ai">선생님 노트 · AI</span><div><Ja text={b.text} /></div></div>
+    case 'teacher': return <div className="blk-teacher"><span className="tag ai">선생님 한마디 · AI</span><div><Ja text={b.text} /></div></div>
+    case 'key': return <div className="blk-key"><span className="tag ai">핵심 · AI</span><div><Ja text={b.text} /></div></div>
     case 'box': return <div className="blk-box jp"><Ja text={b.text} /></div>
     case 'ja': return <p className="blk-ja jp"><Ja text={b.text} /></p>
     case 'ko': return <p className="blk-p muted">{b.text}</p>
@@ -39,7 +40,7 @@ function BlockView({ b, sentences }: { b: Block; sentences: Map<string, Sentence
       return (
         <div className="blk-ex">
           <div className="jp ja"><Ja text={b.ja} kana={b.kana} hl={b.hl} /></div>
-          {b.kana && <div className="jp kana">{b.kana}</div>}
+          {b.kana && !study && <div className="jp kana">{b.kana}</div>}
           <div className="muted">{b.ko}</div>
         </div>
       )
@@ -73,17 +74,24 @@ export function OriginalPage({ bookId, page }: { bookId: string; page: number })
 export function CardView({ c, sentences, offset, bookId, noQ }: { c: Card; sentences: Map<string, Sentence>; offset: number; bookId: string; noQ?: boolean }) {
   const [orig, setOrig] = useState(false)
   const ai = c.kind === 'teacher'
+  const tag = <span className={`tag ${ai ? 'ai' : 'info'}`}>{ai ? '선생님 정리 · AI' : '교재 원문'}</span>
+  const link = !ai && <button className="link small" onClick={() => setOrig(!orig)}>{orig ? '원본 닫기' : `원본 대조 p.${printedPage(c.page, offset)}`}</button>
+  const title = <>
+    <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></div>
+    {c.sub && <div className="lc-sub">{c.sub}</div>}
+  </>
   return (
-    <section className={`card lesson-card ${ai ? 'ai-card' : ''}`}>
-      <div className="row">
-        <span className={`tag ${ai ? 'ai' : 'info'}`}>{ai ? '선생님 정리 · AI' : '교재 원문'}</span>
-        <span className="grow" />
-        {!ai && <button className="link small" onClick={() => setOrig(!orig)}>{orig ? '원본 닫기' : `원본 대조 p.${printedPage(c.page, offset)}`}</button>}
-      </div>
+    <section className={`card lesson-card ${noQ ? 'study-card' : ''} ${ai ? 'ai-card' : ''}`}>
+      {noQ
+        // 학습 중에는 한 화면에 들어가도록 태그를 뜻 줄 오른쪽에 붙인다
+        ? <>
+          <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></div>
+          <div className="row lc-head"><div className="lc-sub grow">{c.sub}</div>{tag}{link}</div>
+        </>
+        : <div className="row">{tag}<span className="grow" />{link}</div>}
       {orig && <OriginalPage bookId={bookId} page={c.page} />}
-      <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></div>
-      {c.sub && <div className="lc-sub">{c.sub}</div>}
-      {c.blocks.filter(b => !noQ || b.t !== 'q').map((b, i) => <BlockView key={i} b={b} sentences={sentences} />)}
+      {!noQ && title}
+      {c.blocks.filter(b => !noQ || (b.t !== 'q' && b.t !== 'note')).map((b, i) => <BlockView key={i} b={b} sentences={sentences} study={noQ} />)}
     </section>
   )
 }

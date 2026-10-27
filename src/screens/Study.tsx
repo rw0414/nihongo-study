@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, getSettings, STAGES, type Cursor, type Review, type Sentence, type Session, type Stage, type Step, type Vocab, type VocabGrade } from '../db'
 import { chunks, dayContent, dayKey, grade, orderSentences, pickSentences, pickVocab, shuffle, traps, type Grade } from '../study'
@@ -163,6 +163,19 @@ const toHira = (s: string) => s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c
  * 입력 화면에서는 폰 키보드가 늘 올라와 있게: 입력칸은 카드가 바뀌어도 그대로 두고(키보드가 내려가지 않음) 포커스를 지킨다.
  * 화면 높이는 키보드를 뺀 '보이는 영역'(visualViewport)에 맞춘다.
  */
+/** 문법 카드가 화면보다 조금 길면 80%까지 줄여서 한 화면에 넣는다 (그보다 길면 카드 안에서 스크롤) */
+function useFitCard(key?: string) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const box = ref.current, card = box?.firstElementChild as HTMLElement | null
+    if (!box || !card) return
+    card.style.zoom = ''
+    const z = box.clientHeight / card.offsetHeight
+    if (z < 1) card.style.zoom = String(Math.max(0.8, z))
+  }, [key])
+  return ref
+}
+
 function useKeyboardFrame() {
   useEffect(() => {
     const vv = window.visualViewport
@@ -498,6 +511,7 @@ export default function Study({ bookId, cid, partId, stage: want, mode }: { book
   const [nothing, setNothing] = useState(false) // 오답만 학습인데 복습할 게 없음
   const busy = useRef(false) // 연타 방지: 한 항목에 답은 한 번만 (저장이 끝나면 풀림)
   const active = useActiveTime(session?.id, session?.activeMs ?? 0)
+  const fitRef = useFitCard(session && `${session.state.step}/${session.state.i}`)
 
   // 교재 단어의 한자→읽기 (긴 단어부터): 한자·가나 섞어 쓴 답 채점용
   const readings = useMemo<[string, string][]>(() => {
@@ -775,7 +789,7 @@ export default function Study({ bookId, cid, partId, stage: want, mode }: { book
     const sMap = new Map(unitSent.map(s => [s.id.slice(unitId.length + 1), s]))
     body = !c ? skip : (
       <>
-        <div className="grammar-scroll">
+        <div className="grammar-scroll" ref={fitRef}>
           <CardView c={c} sentences={sMap} offset={book.printedPageOffset} bookId={bookId} noQ />
         </div>
         <div className="row">

@@ -6,6 +6,7 @@ export type Block =
   | { t: 'formula'; left: string; right: string; rightSub?: string; crossed?: boolean }
   | { t: 'ex'; ja: string; ko: string; hl?: string; ruby?: string; kana?: string } // kana: AI가 붙인 읽기
   | { t: 'teacher'; text: string } // AI 선생님 노트 (교재 원문 아님)
+  | { t: 'key'; text: string } // AI 핵심 한 줄 (원문 설명은 그대로 두고 위에 덧붙임)
   | { t: 'table'; rows: string[][] }
   | { t: 'q'; ref: string }
 
