@@ -5,7 +5,7 @@ import { chunks, dayContent, dayKey, grade, orderSentences, pickSentences, pickV
 import { addDays, ankiAnswer, reviewExempt, dueToday, dueVocab, newSched, recovery, relatedPicks, review, sentenceGrade, vocabState, type ErrorType } from '../srs'
 import { CardView } from './Unit'
 import { go } from '../App'
-import { Ja } from '../Ja'
+import { Ja, speak } from '../Ja'
 import { hanjaOf } from '../hanja'
 import { toRomaji } from '../romaji'
 
@@ -22,15 +22,6 @@ const stageOf = (s: Step): Stage => (s.startsWith('vocab') ? 'vocab' : s === 'gr
 const MAX_TRIES = 6 // 같은 학습에서 한 단어를 다시 내는 최대 횟수
 const DUE_LIMIT = { vocab: 30, sentence: 10 } // 하루 루틴에 섞는 복습 예정 항목 최대 수
 const IDLE_MS = 60000, TICK_MS = 5000 // 1분 넘게 아무 조작이 없으면 학습 시간에서 뺀다
-
-/** 발음 듣기: 기기 내장 음성 합성(일본어). 교재 음원 연결은 Phase 6 */
-function speak(text: string) {
-  if (!('speechSynthesis' in window)) return
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = 'ja-JP'
-  speechSynthesis.cancel()
-  speechSynthesis.speak(u)
-}
 
 /** 실제 학습 시간: 화면이 보이고 최근 1분 안에 조작이 있을 때만 5초씩 더한다 */
 function useActiveTime(id: number | undefined, initial: number) {

@@ -413,21 +413,28 @@ details.more.card ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
 .stage.prog.now { background: var(--warn); color: #fff; box-shadow: 0 6px 0 #6E2406; } /* 가장 최근 스테이지 강조가 우선 */
 
 /* 학습 중 문법 카드: 스크롤 없이 한 화면에 */
-.study-card { gap: 8px; padding: 14px 16px; }
-.study-card .lc-head { gap: 8px; margin-top: -6px; }
-.study-card .lc-sub { margin-top: 0; font-size: 15px; }
+.study-card { gap: 10px; padding: 14px 16px; }
+.study-card .lc-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; }
+.study-card .lc-title.grammar { font-size: 26px; }
+.study-card .lc-sub { margin-top: 0; font-size: 15px; font-weight: 400; color: var(--muted); }
+.study-card .lc-meta { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.study-card .lc-meta .link { height: auto; padding: 2px 0; font-size: 12px; }
 .study-card .blk-p { font-size: 14px; line-height: 1.6; }
-.study-card .blk-key { display: block; font-size: 15px; padding: 8px 12px; }
-.study-card .blk-key .tag, .study-card .blk-teacher .tag { display: inline; margin-right: 6px; vertical-align: 1px; }
-.study-card .blk-key > div, .study-card .blk-teacher > div { display: inline; }
-.study-card .blk-teacher { display: block; font-size: 13px; line-height: 1.55; padding: 8px 12px; }
-.study-card .blk-formula { gap: 8px; }
-.study-card .f-left { padding: 6px 14px; }
-.study-card .f-right { padding: 4px 12px; }
-.study-card .blk-ex { padding-top: 6px; }
-.study-card .blk-ex .ja { font-size: 19px; line-height: 1.45; }
-.study-card { gap: 6px; }
-.study-card .lc-head .link { height: auto; padding: 4px 0; }
+.study-card .blk-key { display: block; font-size: 16px; line-height: 1.5; padding: 10px 12px; }
+.study-card .blk-key .tag { vertical-align: 2px; }
+.study-card .blk-formula { gap: 8px; flex-wrap: wrap; }
+.study-card .f-left { padding: 6px 14px; border-radius: 10px; }
+.study-card .f-right { padding: 6px 14px; border: none; background: var(--warn-soft); font-size: 18px; }
+.study-card .f-eq { color: var(--muted); font-size: 14px; }
+.study-card .blk-ex.boxed { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+.study-card .blk-ex .ja { font-size: 20px; line-height: 1.5; }
+.study-card .blk-ex .icon-btn { flex: none; }
+.study-card .hl { color: inherit; background: var(--warn-soft); box-shadow: inset 0 -2px 0 var(--warn); border-radius: 2px; }
+.ko-reveal { display: block; width: 100%; text-align: left; background: none; border: none; padding: 2px 0 0; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; }
+.ko-reveal.on { color: var(--ink); }
+.study-card .blk-teacher { display: flex; gap: 4px; background: none; border-left: 3px solid #8E74D6; border-radius: 0; padding: 2px 0 2px 12px; font-size: 14px; line-height: 1.55; white-space: normal; }
+:root[data-theme="dark"] .study-card .blk-teacher { background: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .study-card .blk-teacher { background: none; } }
 /* 그래도 넘치는 긴 카드는 카드 안에서만 스크롤하고 '다음 카드' 버튼은 화면에 고정 */
 .study:has(.study-card) { height: 100dvh; min-height: 0; }
 .study:has(.study-card) .step-anim { min-height: 0; }

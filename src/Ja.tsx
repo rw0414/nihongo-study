@@ -48,3 +48,12 @@ export function Ja({ text, kana, force, hl }: { text: string; kana?: string; for
     </>
   )
 }
+
+/** 발음 듣기: 기기 내장 음성 합성(일본어). 교재 음원 연결은 Phase 6 */
+export function speak(text: string) {
+  if (!('speechSynthesis' in window)) return
+  const u = new SpeechSynthesisUtterance(text)
+  u.lang = 'ja-JP'
+  speechSynthesis.cancel()
+  speechSynthesis.speak(u)
+}

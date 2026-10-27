@@ -5,7 +5,7 @@ import type { Block, Card } from '../content'
 import { printedPage } from '../book'
 import { usePageImage } from '../usePageImage'
 import { go } from '../App'
-import { Ja } from '../Ja'
+import { Ja, speak } from '../Ja'
 
 // 단원 콘텐츠 검토·수정 화면 (Phase 2). 탭: 문법 카드 / 단어 / 예문
 type Tab = 'cards' | 'vocab' | 'sentences'
@@ -23,8 +23,14 @@ function BlockView({ b, sentences, study }: { b: Block; sentences: Map<string, S
     case 'p': return <p className="blk-p"><Ja text={b.text} /></p>
     case 'h': return <div className="blk-h"><Ja text={b.text} /></div>
     case 'note': return <div className="blk-note"><Ja text={b.text} /></div>
-    case 'teacher': return <div className="blk-teacher"><span className="tag ai">선생님 한마디 · AI</span><div><Ja text={b.text} /></div></div>
-    case 'key': return <div className="blk-key"><span className="tag ai">핵심 · AI</span><div><Ja text={b.text} /></div></div>
+    case 'teacher':
+      return (
+        <div className="blk-teacher">
+          <span className="tag ai">선생님 한마디 · AI</span>
+          {b.text.split('\n').map((l, i) => <div key={i}><Ja text={l} /></div>)}
+        </div>
+      )
+    case 'key': return <div className="blk-key"><Ja text={b.text} /> <span className="tag ai">AI</span></div>
     case 'box': return <div className="blk-box jp"><Ja text={b.text} /></div>
     case 'ja': return <p className="blk-ja jp"><Ja text={b.text} /></p>
     case 'ko': return <p className="blk-p muted">{b.text}</p>
@@ -33,10 +39,12 @@ function BlockView({ b, sentences, study }: { b: Block; sentences: Map<string, S
       return (
         <div className="blk-formula">
           <span className="f-left"><Ja text={b.left} /></span><span className="muted">+</span>
-          <span className={`f-right jp ${b.crossed ? 'crossed' : ''}`}><Ja text={b.right} /><small>{b.rightSub}</small></span>
+          <span className={`f-right jp ${b.crossed ? 'crossed' : ''}`}><Ja text={b.right} />{!study && <small>{b.rightSub}</small>}</span>
+          {study && b.rightSub && <span className="f-eq">{/^\(([^()]*)\)$/.test(b.rightSub) ? `= ${b.rightSub.slice(1, -1)}` : b.rightSub}</span>}
         </div>
       )
     case 'ex':
+      if (study) return <ExView b={b} />
       return (
         <div className="blk-ex">
           <div className="jp ja"><Ja text={b.ja} kana={b.kana} hl={b.hl} /></div>
@@ -64,6 +72,20 @@ function BlockView({ b, sentences, study }: { b: Block; sentences: Map<string, S
   }
 }
 
+/** 학습 중 예문: 듣기 버튼, 뜻은 눌러야 보인다 */
+function ExView({ b }: { b: Extract<Block, { t: 'ex' }> }) {
+  const [ko, setKo] = useState(false)
+  return (
+    <div className="blk-ex boxed">
+      <div className="row">
+        <div className="jp ja grow"><Ja text={b.ja} kana={b.kana} hl={b.hl} /></div>
+        <button className="icon-btn" aria-label="발음 듣기" onClick={() => speak(b.kana || b.ja)}>🔊</button>
+      </div>
+      <button className={`ko-reveal ${ko ? 'on' : ''}`} onClick={() => setKo(!ko)}>{ko ? b.ko : '눌러서 뜻 보기'}</button>
+    </div>
+  )
+}
+
 // 원본 페이지를 카드 바로 아래에 펼쳐 대조 (두 번 탭하면 전체 화면 보기)
 export function OriginalPage({ bookId, page }: { bookId: string; page: number }) {
   const url = usePageImage(bookId, page)
@@ -74,6 +96,8 @@ export function OriginalPage({ bookId, page }: { bookId: string; page: number })
 export function CardView({ c, sentences, offset, bookId, noQ }: { c: Card; sentences: Map<string, Sentence>; offset: number; bookId: string; noQ?: boolean }) {
   const [orig, setOrig] = useState(false)
   const ai = c.kind === 'teacher'
+  // 정리된 문법 카드: 학습 중에는 교재 설명(p) 대신 핵심 한 줄 + 선생님 한마디로 본다 (원문은 원본 대조·라이브러리에서)
+  const brief = noQ && c.kind === 'grammar' && c.blocks.some(b => b.t === 'key')
   const tag = <span className={`tag ${ai ? 'ai' : 'info'}`}>{ai ? '선생님 정리 · AI' : '교재 원문'}</span>
   const link = !ai && <button className="link small" onClick={() => setOrig(!orig)}>{orig ? '원본 닫기' : `원본 대조 p.${printedPage(c.page, offset)}`}</button>
   const title = <>
@@ -84,14 +108,15 @@ export function CardView({ c, sentences, offset, bookId, noQ }: { c: Card; sente
     <section className={`card lesson-card ${noQ ? 'study-card' : ''} ${ai ? 'ai-card' : ''}`}>
       {noQ
         // 학습 중에는 한 화면에 들어가도록 태그를 뜻 줄 오른쪽에 붙인다
-        ? <>
-          <div className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></div>
-          <div className="row lc-head"><div className="lc-sub grow">{c.sub}</div>{tag}{link}</div>
-        </>
+        ? <div className="lc-head">
+          <span className={`lc-title ${c.kind === 'grammar' ? 'jp grammar' : ''}`}><Ja text={c.title} /></span>
+          {c.sub && <span className="lc-sub">{c.sub}</span>}
+          <span className="lc-meta">{tag}{link}</span>
+        </div>
         : <div className="row">{tag}<span className="grow" />{link}</div>}
       {orig && <OriginalPage bookId={bookId} page={c.page} />}
       {!noQ && title}
-      {c.blocks.filter(b => !noQ || (b.t !== 'q' && b.t !== 'note')).map((b, i) => <BlockView key={i} b={b} sentences={sentences} study={noQ} />)}
+      {c.blocks.filter(b => !noQ || (b.t !== 'q' && b.t !== 'note' && !(brief && b.t === 'p'))).map((b, i) => <BlockView key={i} b={b} sentences={sentences} study={noQ} />)}
     </section>
   )
 }
